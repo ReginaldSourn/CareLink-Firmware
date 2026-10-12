@@ -1,0 +1,12 @@
+menu "CareLink GPS"
+    config CARELINK_GPS_STALE_MS
+        int "Maximum age of a current position (milliseconds)"
+        range 1000 60000
+        default 5000
+
+    config CARELINK_GPS_RAW_LOG
+        bool "Log received NMEA sentences for bench diagnostics"
+        default n
+        help
+            Logs include location. Leave disabled for normal operation.
+endmenu

@@ -1,0 +1,27 @@
+cmake_minimum_required(VERSION 3.16)
+project(carelink_host_tests C)
+enable_testing()
+option(CARELINK_SANITIZE "Enable address/undefined behavior sanitizers" OFF)
+add_executable(test_gps test_gps.c
+    ../components/carelink_nmea/carelink_nmea.c
+    ../components/carelink_gps/carelink_gps_state.c)
+target_include_directories(test_gps PRIVATE
+    ../components/carelink_nmea/include ../components/carelink_gps/include)
+target_compile_features(test_gps PRIVATE c_std_11)
+target_compile_options(test_gps PRIVATE -Wall -Wextra -Werror -Wpedantic -UNDEBUG)
+target_link_libraries(test_gps PRIVATE m)
+if(CARELINK_SANITIZE)
+    target_compile_options(test_gps PRIVATE -fsanitize=address,undefined -fno-omit-frame-pointer)
+    target_link_options(test_gps PRIVATE -fsanitize=address,undefined)
+endif()
+add_test(NAME gps_parser_and_freshness COMMAND test_gps)
+
+add_executable(test_oled test_oled.c ../components/carelink_oled/oled_text.c)
+target_include_directories(test_oled PRIVATE ../components/carelink_oled)
+target_compile_features(test_oled PRIVATE c_std_11)
+target_compile_options(test_oled PRIVATE -Wall -Wextra -Werror -Wpedantic -UNDEBUG)
+if(CARELINK_SANITIZE)
+    target_compile_options(test_oled PRIVATE -fsanitize=address,undefined -fno-omit-frame-pointer)
+    target_link_options(test_oled PRIVATE -fsanitize=address,undefined)
+endif()
+add_test(NAME oled_rendering COMMAND test_oled)

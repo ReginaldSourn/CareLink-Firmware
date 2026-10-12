@@ -1,0 +1,13 @@
+menu "CareLink OLED"
+    config CARELINK_OLED_ENABLED
+        bool "Enable Heltec onboard 128x64 OLED"
+        default y
+        help
+            Uses I2C0, GPIO17/18, reset GPIO21, and enables the shared Vext rail.
+            A missing display does not prevent GPS operation.
+
+    config CARELINK_OLED_ROTATE_180
+        bool "Rotate OLED by 180 degrees"
+        default n
+        depends on CARELINK_OLED_ENABLED
+endmenu
