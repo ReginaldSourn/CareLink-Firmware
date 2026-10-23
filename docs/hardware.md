@@ -70,7 +70,21 @@ The code is built against the installed ESP-IDF v6.1 API, including a finite
 100 ms I2C transaction timeout. Live display brightness/orientation still require
 checking on the physical board.
 
-### Physical testing
+### LSM6DSO IMU integration
+
+The IMU implementation targets LSM6DSO (letter O), using ST's
+[platform-independent driver](https://github.com/STMicroelectronics/lsm6dso-pid)
+at the revision recorded in `components/carelink_imu/vendor/README.md`.
+The user selected Vext supply; its R2/R8 control is shared with the OLED and
+must remain enabled during IMU recovery. SDA/SCL and breakout details have not
+been supplied. IMU support therefore defaults disabled and dedicated-bus GPIOs
+default to `-1`. An explicit shared-bus option uses OLED SDA17/SCL18; otherwise
+the driver uses I2C1 on validated header pins. The address is configurable as
+7-bit `0x6A` or `0x6B`. Confirm CS/SA0 strapping, supply compatibility and proper
+pull-ups against the breakout schematic before enabling it. LSM6DS0 (zero)
+requires a different driver and is not supported by this implementation.
+
+### Physical testing status
 
 Compilation and native tests are possible locally. No connected serial device
 is available for flashing or reception testing. Confirm R2/R8, module marking,

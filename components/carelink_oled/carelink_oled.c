@@ -3,6 +3,7 @@
 
 #if CONFIG_CARELINK_OLED_ENABLED
 #include "carelink_board.h"
+#include "carelink_i2c.h"
 #include "driver/i2c_master.h"
 #include "esp_lcd_io_i2c.h"
 #include "esp_lcd_panel_io.h"
@@ -21,25 +22,14 @@ static void release_resources(void)
 {
     if (panel) { esp_lcd_panel_del(panel); panel = NULL; }
     if (io) { esp_lcd_panel_io_del(io); io = NULL; }
-    if (bus) { i2c_del_master_bus(bus); bus = NULL; }
+    bus = NULL; /* The shared bus may still be serving the IMU. */
     /* Do not switch off Vext: it also supplies external header devices. */
 }
 
 esp_err_t carelink_oled_init(void)
 {
     if (panel) return ESP_ERR_INVALID_STATE;
-    esp_err_t err = carelink_board_vext_power(true);
-    if (err != ESP_OK) return err;
-    vTaskDelay(pdMS_TO_TICKS(50));
-    const i2c_master_bus_config_t bus_config = {
-        .i2c_port = I2C_NUM_0,
-        .sda_io_num = CARELINK_OLED_SDA_GPIO,
-        .scl_io_num = CARELINK_OLED_SCL_GPIO,
-        .clk_source = I2C_CLK_SRC_DEFAULT,
-        .glitch_ignore_cnt = 7,
-        .flags.enable_internal_pullup = true,
-    };
-    err = i2c_new_master_bus(&bus_config, &bus);
+    esp_err_t err = carelink_i2c_get_shared_bus(&bus);
     if (err != ESP_OK) goto fail;
     const esp_lcd_panel_io_i2c_config_t io_config = {
         .dev_addr = CARELINK_OLED_I2C_ADDRESS,
@@ -100,7 +90,9 @@ esp_err_t carelink_oled_show_lines(const char *const lines[], size_t count)
         /* Hardware reset switches the panel off without relying on I2C. Avoid
          * leaving an old FIX visible after a broken transfer. */
         esp_lcd_panel_reset(panel);
-        release_resources();
+        /* The display consumer stops updates after this error. Retain the
+         * device until reboot: removing it while the IMU is transferring on
+         * the shared bus is not supported by the I2C driver. */
     }
     return err;
 }

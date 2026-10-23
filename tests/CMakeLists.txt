@@ -25,3 +25,27 @@ if(CARELINK_SANITIZE)
     target_link_options(test_oled PRIVATE -fsanitize=address,undefined)
 endif()
 add_test(NAME oled_rendering COMMAND test_oled)
+
+add_executable(test_imu_state test_imu_state.c ../components/carelink_imu/carelink_imu_state.c)
+add_executable(test_lsm6dso_device test_lsm6dso_device.c
+    ../components/carelink_imu/lsm6dso_device.c
+    ../components/carelink_imu/vendor/lsm6dso_reg.c)
+add_executable(test_imu_port test_imu_port.c
+    ../components/carelink_imu/lsm6dso_port.c
+    ../components/carelink_i2c/carelink_i2c.c)
+target_include_directories(test_imu_port PRIVATE imu_mocks
+    ../components/carelink_board/include ../components/carelink_i2c/include)
+foreach(target test_imu_state test_lsm6dso_device test_imu_port)
+    target_include_directories(${target} PRIVATE ../components/carelink_imu/include
+        ../components/carelink_imu ../components/carelink_imu/vendor)
+    target_compile_features(${target} PRIVATE c_std_11)
+    target_compile_options(${target} PRIVATE -Wall -Wextra -Werror -Wpedantic -UNDEBUG)
+    target_link_libraries(${target} PRIVATE m)
+    if(CARELINK_SANITIZE)
+        target_compile_options(${target} PRIVATE -fsanitize=address,undefined -fno-omit-frame-pointer)
+        target_link_options(${target} PRIVATE -fsanitize=address,undefined)
+    endif()
+endforeach()
+add_test(NAME imu_freshness COMMAND test_imu_state)
+add_test(NAME lsm6dso_device COMMAND test_lsm6dso_device)
+add_test(NAME imu_port_lifecycle COMMAND test_imu_port)

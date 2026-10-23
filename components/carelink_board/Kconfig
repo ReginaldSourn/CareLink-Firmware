@@ -27,4 +27,31 @@ menu "CareLink board"
         int "GNSS UART baud rate"
         range 1200 115200
         default 9600
+    if CARELINK_IMU_ENABLED
+        config CARELINK_IMU_SHARED_I2C
+            bool "IMU shares OLED I2C0 (SDA17/SCL18)"
+            default n
+            help
+                Enable only if the IMU is physically wired to the OLED bus.
+                Otherwise the IMU uses I2C1 on the header pins below.
+
+        config CARELINK_IMU_SDA_GPIO
+            int "IMU SDA GPIO (-1 means not configured)"
+            depends on !CARELINK_IMU_SHARED_I2C
+            range -1 48
+            default -1
+
+        config CARELINK_IMU_SCL_GPIO
+            int "IMU SCL GPIO (-1 means not configured)"
+            depends on !CARELINK_IMU_SHARED_I2C
+            range -1 48
+            default -1
+
+        config CARELINK_IMU_VEXT_POWER
+            bool "IMU powered from Vext"
+            default y
+            help
+                Enable Vext before initializing the IMU. Vext stays enabled
+                because OLED and other external devices may share this supply.
+    endif
 endmenu

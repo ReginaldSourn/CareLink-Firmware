@@ -17,3 +17,9 @@ enum {
 esp_err_t carelink_board_vext_power(bool enabled);
 esp_err_t carelink_board_gnss_power(bool enabled);
 esp_err_t carelink_board_validate(void);
+/* IMU-only validation; does not prevent GPS startup on an IMU config error. */
+esp_err_t carelink_board_imu_validate(void);
+int carelink_board_imu_sda_gpio(void);
+int carelink_board_imu_scl_gpio(void);
+bool carelink_board_imu_shared_bus(void);
+bool carelink_board_imu_uses_vext(void);

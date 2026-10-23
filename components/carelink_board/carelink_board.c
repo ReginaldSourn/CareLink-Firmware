@@ -53,3 +53,68 @@ esp_err_t carelink_board_gnss_power(bool enabled)
     return ESP_OK;
 #endif
 }
+
+bool carelink_board_imu_shared_bus(void)
+{
+#if CONFIG_CARELINK_IMU_SHARED_I2C
+    return true;
+#else
+    return false;
+#endif
+}
+
+bool carelink_board_imu_uses_vext(void)
+{
+#if CONFIG_CARELINK_IMU_VEXT_POWER
+    return true;
+#else
+    return false;
+#endif
+}
+
+int carelink_board_imu_sda_gpio(void)
+{
+#if CONFIG_CARELINK_IMU_SHARED_I2C
+    return CARELINK_OLED_SDA_GPIO;
+#elif CONFIG_CARELINK_IMU_ENABLED
+    return CONFIG_CARELINK_IMU_SDA_GPIO;
+#else
+    return -1;
+#endif
+}
+
+int carelink_board_imu_scl_gpio(void)
+{
+#if CONFIG_CARELINK_IMU_SHARED_I2C
+    return CARELINK_OLED_SCL_GPIO;
+#elif CONFIG_CARELINK_IMU_ENABLED
+    return CONFIG_CARELINK_IMU_SCL_GPIO;
+#else
+    return -1;
+#endif
+}
+
+static bool imu_header_pin_available(int pin)
+{
+    if (pin == carelink_board_gps_rx_gpio()) return false;
+    switch (pin) {
+    case 4: case 6: case 15: case 16: case 38: case 39: case 47: case 48:
+        return true;
+    default:
+        return false;
+    }
+}
+
+esp_err_t carelink_board_imu_validate(void)
+{
+    int sda = carelink_board_imu_sda_gpio();
+    int scl = carelink_board_imu_scl_gpio();
+    if (sda == scl) return ESP_ERR_INVALID_ARG;
+    if (carelink_board_imu_shared_bus()) {
+        if (sda == carelink_board_gps_rx_gpio() || scl == carelink_board_gps_rx_gpio())
+            return ESP_ERR_INVALID_ARG;
+        return ESP_OK;
+    }
+    return imu_header_pin_available(sda) && imu_header_pin_available(scl)
+        ? ESP_OK : ESP_ERR_INVALID_ARG;
+}

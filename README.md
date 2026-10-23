@@ -2,8 +2,9 @@
 
 ESP-IDF firmware for testing a Quectel L76C GNSS receiver with a **Heltec WiFi
 LoRa 32 V4 (ESP32-S3)**. This milestone receives GPS data and reports position
-and receiver health over USB and the onboard OLED. LoRa transport, IMU, SOS detection and low
-power scheduling are future application work.
+and receiver health over USB and the onboard OLED. Optional LSM6DSO IMU support
+reports acceleration, angular velocity and sensor health over USB. LoRa
+transport, SOS detection and low power scheduling are future application work.
 
 ## Hardware setup
 
@@ -36,8 +37,9 @@ radio, display, memory, USB, strapping and power-control pins.
 ## Build and flash
 
 Use an activated ESP-IDF environment. The project was built with **ESP-IDF
-v6.1**. It uses native UART/GPIO drivers with no downloaded third-party library
-dependencies. PSRAM is not required or enabled.
+v6.1**. It uses native ESP-IDF peripheral drivers and a vendored, pinned ST
+LSM6DSO register driver; building requires no sensor-library downloads. PSRAM
+is not required or enabled.
 
 ```sh
 # Activate your installed ESP-IDF environment first.
@@ -92,11 +94,70 @@ while waiting for a fix. Expired/invalid coordinates are removed from the screen
 
 An absent OLED logs a warning and GPS continues over USB. If a frame transfer
 fails, the driver resets the panel to prevent a frozen position remaining
-visible, releases its I2C resources, and stops updates until reboot. Vext stays
-enabled because it also powers external headers. Check the board variant and
-display connector if the screen is blank. I2C0 is owned by the display component;
-future sensors on that bus should share its bus handle rather than create a
-second bus driver.
+visible and stops updates until reboot. It retains its device resources to
+avoid removing a device during an IMU transfer on the shared bus. Vext stays
+enabled because it also powers external headers. Check the board variant
+and display connector if the screen is blank. `carelink_i2c` owns I2C0 for
+firmware lifetime so the OLED and an optional IMU can share the bus safely.
+
+## LSM6DSO IMU
+
+Support targets **LSM6DSO (letter O)**, not LSM6DS0 (zero). It checks the
+device identity before configuring it. IMU support is **disabled by default**
+until SDA/SCL wiring is selected; no header pin assignment is assumed.
+Vext power is the default when enabled, matching the planned hardware.
+
+In `idf.py menuconfig`:
+
+1. Under **Component config → CareLink IMU**, enable LSM6DSO and select the
+   7-bit address: `0x6A` for SA0 low or `0x6B` for SA0 high (default `0x6A`).
+2. Under **CareLink board**, leave **IMU powered from Vext** enabled and select
+   the correct R2/R8 variant. Configure either:
+   - A dedicated I2C1 bus: set SDA/SCL to your actual header wiring. Available
+     candidates are GPIO4, 6, 15, 16, 38, 39, 47 and 48, excluding the configured
+     GPS RX pin (default GPIO39). Pins start at `-1`; reserved, duplicate and
+     GPS-conflicting assignments fail startup before configuring GPIOs.
+   - **IMU shares OLED I2C0** only when wired to SDA GPIO17 and SCL GPIO18.
+     This also works with OLED support disabled.
+3. Select the sensor rate and ranges. Defaults are **104 Hz, ±4 g, ±500 dps**
+   and a **500 ms** freshness limit. Supported rates are 26/52/104/208 Hz.
+4. Build, flash and monitor using the commands above.
+
+Connect the compatible breakout supply to Vext and ground to GND. Confirm its
+I2C mode, CS/SA0 strapping and pull-ups from its schematic; use proper external
+I2C pull-ups for the 400 kHz bus. Vext remains on during IMU cleanup and recovery
+because the OLED and other attached devices may also need it. SDA/SCL, address
+strapping and breakout voltage compatibility still need physical verification.
+
+The independent sampling task publishes sensor-frame X/Y/Z acceleration in
+**m/s²** (including gravity) and angular velocity in **rad/s**. USB diagnostics
+print once per second. `carelink_imu_start()` starts the service;
+`carelink_imu_get_snapshot()` copies its latest sample and health atomically.
+Use values only when `snapshot.state == CARELINK_IMU_READY`. Timestamps are
+monotonic reception times, not exact synchronized sensor timestamps. `sequence`
+counts published samples and wraps naturally; `read_errors` includes failed
+runtime reads and reinitialization attempts. A successful snapshot call alone
+does not imply valid data.
+
+After a runtime transfer failure the service immediately invalidates the sample
+and retries initialization with a one-second backoff. Missing data becomes
+stale at the configured age and triggers reinitialization, including after a
+sensor loses its configuration. Recovery requires a new complete sample before
+returning to `READY`. Initial startup failure is logged and leaves the service
+stopped; startup can be retried by the application or after a reboot. GPS and
+IMU startup failures do not stop each other's diagnostics.
+
+This is a latest-sample diagnostic service, without FIFO, interrupt acquisition,
+calibration, mounting transforms or fall/SOS detection. RTOS tick resolution,
+OLED traffic and scheduling can reduce the effective acquisition rate. A
+lossless motion-processing application should add a bounded sample stream/FIFO
+and measure timing before depending on every sensor conversion.
+
+Bench check: keep the unit still and expect acceleration magnitude near
+9.81 m/s² and gyro values near zero, then rotate each axis and verify the signs.
+Disconnect/reconnect the sensor and confirm error/stale data is rejected and
+fresh readings recover. Verify simultaneous GPS and OLED operation. No physical
+IMU or connected serial device was available for validation here.
 
 ## Code layout
 
@@ -105,10 +166,13 @@ components/
   carelink_board/   Heltec variant, pin validation, GNSS supply control
   carelink_nmea/    Allocation-free streaming parser; independent of ESP-IDF
   carelink_gps/     UART task, health counters, synchronized snapshot API
+  carelink_i2c/     Shared I2C0 ownership for OLED and optional IMU
+  carelink_imu/     LSM6DSO sampling, SI units, health and recovery
   carelink_oled/    OLED initialization, bounded I2C transfers, 1 KB text framebuffer
 main/              CareLink startup, diagnostic consumer and GPS screen layout
 docs/hardware.md   Manufacturer research and wiring decisions
-tests/             Native C parser and freshness tests
+docs/imu-design.md IMU architecture and integration details
+tests/             Native C parser, IMU, transport lifecycle and display tests
 sdkconfig.defaults ESP32-S3, flash and USB defaults
 ```
 
@@ -149,4 +213,9 @@ bounds, zero coordinates, no-fix reports, malformed numeric fields, corrupt and
 overlong input, arbitrary-byte stress, recovery and freshness boundaries.
 OLED tests check framebuffer bounds, clipping, character fallback and clearing
 old coordinate rows. A rendered sample screen was also inspected locally.
+IMU tests use a mocked register transport to check identity rejection, reset
+timeout, each startup transfer failure, readiness, signed conversion, scales,
+partial-read failures and retries. State tests check freshness boundaries and
+fault precedence; port tests check Vext handling, pin-validation failure,
+bounded transfers, cleanup and shared-bus retention.
 Build/tests do not verify electrical compatibility or live satellite fixes.

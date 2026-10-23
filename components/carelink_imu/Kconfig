@@ -1,0 +1,77 @@
+menu "CareLink IMU"
+    config CARELINK_IMU_ENABLED
+        bool "Enable LSM6DSO (letter O) IMU"
+        default n
+        help
+            Configure wiring under CareLink board before enabling. LSM6DS0
+            (zero) is a different device and is not supported by this driver.
+
+    if CARELINK_IMU_ENABLED
+        config CARELINK_IMU_I2C_ADDRESS
+            hex "IMU 7-bit I2C address (SA0 low: 0x6a; high: 0x6b)"
+            range 0x6a 0x6b
+            default 0x6a
+
+        choice CARELINK_IMU_RATE
+            prompt "Accelerometer and gyroscope output rate"
+            default CARELINK_IMU_RATE_104
+            config CARELINK_IMU_RATE_26
+                bool "26 Hz"
+            config CARELINK_IMU_RATE_52
+                bool "52 Hz"
+            config CARELINK_IMU_RATE_104
+                bool "104 Hz"
+            config CARELINK_IMU_RATE_208
+                bool "208 Hz"
+        endchoice
+        config CARELINK_IMU_RATE_HZ
+            int
+            default 26 if CARELINK_IMU_RATE_26
+            default 52 if CARELINK_IMU_RATE_52
+            default 208 if CARELINK_IMU_RATE_208
+            default 104
+
+        choice CARELINK_IMU_ACCEL_RANGE
+            prompt "Accelerometer full scale"
+            default CARELINK_IMU_ACCEL_4G
+            config CARELINK_IMU_ACCEL_2G
+                bool "+/-2 g"
+            config CARELINK_IMU_ACCEL_4G
+                bool "+/-4 g"
+            config CARELINK_IMU_ACCEL_8G
+                bool "+/-8 g"
+            config CARELINK_IMU_ACCEL_16G
+                bool "+/-16 g"
+        endchoice
+        config CARELINK_IMU_ACCEL_RANGE_G
+            int
+            default 2 if CARELINK_IMU_ACCEL_2G
+            default 8 if CARELINK_IMU_ACCEL_8G
+            default 16 if CARELINK_IMU_ACCEL_16G
+            default 4
+
+        choice CARELINK_IMU_GYRO_RANGE
+            prompt "Gyroscope full scale"
+            default CARELINK_IMU_GYRO_500DPS
+            config CARELINK_IMU_GYRO_250DPS
+                bool "+/-250 degrees/s"
+            config CARELINK_IMU_GYRO_500DPS
+                bool "+/-500 degrees/s"
+            config CARELINK_IMU_GYRO_1000DPS
+                bool "+/-1000 degrees/s"
+            config CARELINK_IMU_GYRO_2000DPS
+                bool "+/-2000 degrees/s"
+        endchoice
+        config CARELINK_IMU_GYRO_RANGE_DPS
+            int
+            default 250 if CARELINK_IMU_GYRO_250DPS
+            default 1000 if CARELINK_IMU_GYRO_1000DPS
+            default 2000 if CARELINK_IMU_GYRO_2000DPS
+            default 500
+
+        config CARELINK_IMU_STALE_MS
+            int "Maximum age of a usable sample (milliseconds)"
+            range 100 10000
+            default 500
+    endif
+endmenu
