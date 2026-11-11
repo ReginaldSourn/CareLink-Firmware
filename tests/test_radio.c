@@ -235,6 +235,17 @@ static void reset_driver(void)
 
 int main(void)
 {
+    carelink_radio_config_t runtime_radio = {
+        .frequency_hz = 915000000U,
+        .tx_power_dbm = 0,
+    };
+    assert(carelink_radio_config_valid(&runtime_radio));
+    runtime_radio.frequency_hz = 800000000U;
+    assert(!carelink_radio_config_valid(&runtime_radio));
+    runtime_radio.frequency_hz = 915000000U;
+    runtime_radio.tx_power_dbm = 15;
+    assert(!carelink_radio_config_valid(&runtime_radio));
+
     reset_driver();
     assert(carelink_radio_init() == ESP_OK);
     carelink_radio_status_t status = carelink_radio_get_status();

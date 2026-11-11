@@ -19,6 +19,7 @@ static portMUX_TYPE lock = portMUX_INITIALIZER_UNLOCKED;
 static carelink_gps_snapshot_t shared;
 static QueueHandle_t events;
 static bool started;
+static uint32_t stale_ms = CONFIG_CARELINK_GPS_STALE_MS;
 
 static int64_t now_ms(void) { return esp_timer_get_time() / 1000; }
 
@@ -79,9 +80,13 @@ static void gps_task(void *arg)
     }
 }
 
-esp_err_t carelink_gps_start(void)
+esp_err_t carelink_gps_start_with_stale_ms(uint32_t configured_stale_ms)
 {
     if (started) return ESP_ERR_INVALID_STATE;
+    if (configured_stale_ms < CARELINK_GPS_STALE_MIN_MS ||
+        configured_stale_ms > CARELINK_GPS_STALE_MAX_MS) {
+        return ESP_ERR_INVALID_ARG;
+    }
     esp_err_t err = carelink_board_validate();
     if (err != ESP_OK) return err;
     const uart_config_t config = {
@@ -110,6 +115,7 @@ esp_err_t carelink_gps_start(void)
         goto fail;
     }
     started = true;
+    stale_ms = configured_stale_ms;
     ESP_LOGI(TAG, "UART1 RX=GPIO%d, %d baud, 8N1 (receive only)",
              carelink_board_gps_rx_gpio(), carelink_board_gps_baud());
     return ESP_OK;
@@ -120,6 +126,11 @@ fail:
     return err;
 }
 
+esp_err_t carelink_gps_start(void)
+{
+    return carelink_gps_start_with_stale_ms(CONFIG_CARELINK_GPS_STALE_MS);
+}
+
 esp_err_t carelink_gps_get_snapshot(carelink_gps_snapshot_t *snapshot)
 {
     if (!snapshot) return ESP_ERR_INVALID_ARG;
@@ -127,6 +138,6 @@ esp_err_t carelink_gps_get_snapshot(carelink_gps_snapshot_t *snapshot)
     taskENTER_CRITICAL(&lock);
     *snapshot = shared;
     taskEXIT_CRITICAL(&lock);
-    snapshot->state = carelink_gps_classify(snapshot, now_ms(), CONFIG_CARELINK_GPS_STALE_MS);
+    snapshot->state = carelink_gps_classify(snapshot, now_ms(), stale_ms);
     return ESP_OK;
 }

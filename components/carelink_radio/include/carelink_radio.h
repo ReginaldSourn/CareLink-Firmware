@@ -43,6 +43,13 @@ typedef struct {
     uint32_t receive_errors;
 } carelink_radio_status_t;
 
+typedef struct {
+    uint32_t frequency_hz;
+    int8_t tx_power_dbm;
+} carelink_radio_config_t;
+
+bool carelink_radio_config_valid(const carelink_radio_config_t *config);
+
 /**
  * Initialize the on-board SX1262 and claim it for the calling FreeRTOS task.
  *
@@ -50,6 +57,11 @@ typedef struct {
  * leaves the radio in STDBY_RC and is not safe to call more than once.
  */
 esp_err_t carelink_radio_init(void);
+
+/* Runtime-configurable variant used by the incident service. Hardware pin and
+ * RF-front-end selection remain compile-time board-profile decisions. */
+esp_err_t carelink_radio_init_with_config(
+    const carelink_radio_config_t *config);
 
 /**
  * Transmit one binary raw-LoRa packet and block until TX_DONE or timeout.

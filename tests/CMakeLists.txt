@@ -147,6 +147,20 @@ if(CARELINK_SANITIZE)
 endif()
 add_test(NAME carelink_security_storage COMMAND test_security)
 
+add_executable(test_config test_config.c
+    ../components/carelink_config/carelink_config_codec.c)
+target_include_directories(test_config PRIVATE
+    ../components/carelink_config/include)
+target_compile_features(test_config PRIVATE c_std_11)
+target_compile_options(test_config PRIVATE
+    -Wall -Wextra -Werror -Wpedantic -UNDEBUG)
+if(CARELINK_SANITIZE)
+    target_compile_options(test_config PRIVATE
+        -fsanitize=address,undefined -fno-omit-frame-pointer)
+    target_link_options(test_config PRIVATE -fsanitize=address,undefined)
+endif()
+add_test(NAME carelink_runtime_config COMMAND test_config)
+
 foreach(radio_profile v42_r2 v431_r2 r8)
     foreach(tick_hz 100 1000)
         set(radio_target test_radio_${radio_profile}_${tick_hz}hz)

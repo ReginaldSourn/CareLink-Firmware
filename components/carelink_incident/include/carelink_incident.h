@@ -5,6 +5,7 @@
 
 #include "carelink_auth.h"
 #include "carelink_incident_policy.h"
+#include "carelink_radio.h"
 #include "carelink_sos.h"
 #include "esp_err.h"
 
@@ -25,6 +26,9 @@ typedef struct {
     carelink_auth_key_provider_t key_provider;
     carelink_incident_get_telemetry_fn get_telemetry;
     carelink_incident_next_counter_fn next_replay_counter;
+    carelink_radio_config_t radio;
+    carelink_retry_config_t retry;
+    uint32_t location_update_ms;
     void *context;
 } carelink_incident_config_t;
 
@@ -37,6 +41,7 @@ typedef struct {
     uint32_t dropped_button_events;
     bool running;
     bool persistence_degraded;
+    bool configuration_locked;
 } carelink_incident_status_t;
 
 /* NVS flash must already be initialized. Startup validates the key, restores

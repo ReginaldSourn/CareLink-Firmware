@@ -1,0 +1,35 @@
+menu "CareLink BLE mobile configuration"
+    config CARELINK_BLE_CONFIG_ENABLED
+        bool "Enable secure BLE mobile configuration"
+        default n
+        select BT_ENABLED
+        select ESP_PROTOCOMM_SUPPORT_SECURITY_VERSION_2
+        help
+            Exposes the versioned CareLink runtime configuration through ESP-IDF
+            Local Control over BLE with Security 2 (SRP-6a). A successful write
+            is committed atomically and applied after an automatic restart.
+
+    if CARELINK_BLE_CONFIG_ENABLED
+        config CARELINK_BLE_SEC2_USERNAME
+            string "Per-device Security 2 username"
+            default ""
+            help
+                Manufacturing-provisioned username, 1-32 bytes. Use a unique
+                value per pendant and deliver it out of band to the mobile app.
+
+        config CARELINK_BLE_SEC2_PASSWORD
+            string "Per-device Security 2 password"
+            default ""
+            help
+                Manufacturing-provisioned password, 12-63 bytes. Never reuse it
+                as the CareLink LoRa HMAC key or across multiple pendants.
+
+        config CARELINK_BLE_WINDOW_SECONDS
+            int "Configuration window after boot (seconds; 0 = always on)"
+            range 0 3600
+            default 300
+            help
+                Limits BLE advertising and configuration exposure to reduce
+                battery use. Power-cycle the pendant to reopen a closed window.
+    endif
+endmenu

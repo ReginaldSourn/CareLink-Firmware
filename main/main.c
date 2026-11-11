@@ -9,6 +9,8 @@
 
 #include "carelink.h"
 #include "carelink_board.h"
+#include "carelink_ble_config.h"
+#include "carelink_config.h"
 #include "carelink_gps.h"
 #include "carelink_imu.h"
 #include "carelink_display.h"
@@ -94,17 +96,43 @@ void app_main(void)
 {
     printf("%s firmware starting\n", CARELINK_DEVICE_NAME);
     ESP_LOGI(TAG, "%s starting on %s", CARELINK_DEVICE_NAME, carelink_board_name());
+
+    carelink_runtime_config_t runtime_config;
+    carelink_config_defaults(&runtime_config);
+    bool nvs_ready = false;
+    esp_err_t err = nvs_flash_init();
+    if (err == ESP_OK) {
+        nvs_ready = true;
+        carelink_config_source_t config_source;
+        err = carelink_config_load(&runtime_config, &config_source);
+        if (err != ESP_OK) {
+            ESP_LOGE(TAG, "Runtime configuration load failed: %s; using defaults",
+                     esp_err_to_name(err));
+            carelink_config_defaults(&runtime_config);
+        } else if (config_source == CARELINK_CONFIG_SOURCE_RECOVERY) {
+            ESP_LOGW(TAG, "Runtime configuration is corrupt; using safe defaults");
+        } else if (config_source == CARELINK_CONFIG_SOURCE_RUNTIME) {
+            ESP_LOGI(TAG, "Applied mobile runtime configuration");
+        }
+    } else {
+        ESP_LOGE(TAG, "NVS initialization failed: %s", esp_err_to_name(err));
+    }
+
     esp_err_t battery_err = carelink_board_battery_init();
     bool battery_ready = battery_err == ESP_OK;
     if (battery_err != ESP_OK && battery_err != ESP_ERR_NOT_SUPPORTED) {
         ESP_LOGW(TAG, "Battery monitor unavailable: %s", esp_err_to_name(battery_err));
     }
-    carelink_display_start();
-    esp_err_t err = carelink_gps_start();
+    if (runtime_config.oled_enabled) {
+        carelink_display_start();
+    }
+    err = carelink_gps_start_with_stale_ms(runtime_config.gps_stale_ms);
     bool gps_ready = err == ESP_OK;
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "GPS start failed: %s; check CareLink menuconfig", esp_err_to_name(err));
-        carelink_display_gps_error();
+        if (runtime_config.oled_enabled) {
+            carelink_display_gps_error();
+        }
     }
     err = carelink_imu_start();
     bool imu_ready = err == ESP_OK;
@@ -117,7 +145,7 @@ void app_main(void)
 #if CONFIG_CARELINK_INCIDENT_ENABLED
     incident_context.battery_ready = battery_ready;
     incident_context.gps_ready = gps_ready;
-    err = nvs_flash_init();
+    err = nvs_ready ? ESP_OK : ESP_ERR_INVALID_STATE;
     if (err == ESP_OK) {
         err = carelink_security_init(&incident_context.security);
     }
@@ -133,6 +161,16 @@ void app_main(void)
                 &incident_context.security),
             .get_telemetry = get_incident_telemetry,
             .next_replay_counter = next_incident_counter,
+            .radio = {
+                .frequency_hz = runtime_config.radio_frequency_hz,
+                .tx_power_dbm = runtime_config.radio_tx_power_dbm,
+            },
+            .retry = {
+                .first_delay_ms = runtime_config.retry_first_ms,
+                .maximum_delay_ms = runtime_config.retry_max_ms,
+                .maximum_attempts = runtime_config.maximum_attempts,
+            },
+            .location_update_ms = runtime_config.location_update_ms,
             .context = &incident_context,
         };
         err = carelink_incident_start(&incident_config);
@@ -143,6 +181,16 @@ void app_main(void)
     } else {
         ESP_LOGE(TAG, "SOS incident service unavailable: %s",
                  esp_err_to_name(err));
+    }
+#endif
+
+#if CONFIG_CARELINK_BLE_CONFIG_ENABLED
+    if (nvs_ready) {
+        const esp_err_t ble_error = carelink_ble_config_start();
+        if (ble_error != ESP_OK) {
+            ESP_LOGE(TAG, "BLE mobile configuration unavailable: %s",
+                     esp_err_to_name(ble_error));
+        }
     }
 #endif
 
@@ -158,7 +206,9 @@ void app_main(void)
         }
         carelink_gps_snapshot_t gps;
         if (gps_ready && carelink_gps_get_snapshot(&gps) == ESP_OK) {
-            carelink_display_gps(&gps);
+            if (runtime_config.oled_enabled) {
+                carelink_display_gps(&gps);
+            }
             if (gps.state == CARELINK_GPS_FIXED) {
                 ESP_LOGI(TAG, "GPS %s: lat=%.6f lon=%.6f age=%" PRId64 "ms",
                          gps.fix.sentence_type, gps.fix.latitude_deg, gps.fix.longitude_deg,

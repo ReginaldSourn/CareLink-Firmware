@@ -66,6 +66,11 @@ static void status_state(void)
 {
     portENTER_CRITICAL(&s_status_lock);
     s_status.state = s_sos.snapshot.state;
+    s_status.configuration_locked =
+        s_sos.snapshot.state == CARELINK_SOS_ARMING ||
+        (s_sos.snapshot.state >= CARELINK_SOS_ACTIVE_UNCONFIRMED &&
+         s_sos.snapshot.state <= CARELINK_SOS_CAREGIVER_ACKNOWLEDGED) ||
+        s_sos.snapshot.cancel_delivery_pending;
     portEXIT_CRITICAL(&s_status_lock);
 }
 
@@ -92,12 +97,7 @@ static esp_err_t persist_snapshot(void)
 
 static carelink_retry_config_t retry_config(void)
 {
-    const carelink_retry_config_t config = {
-        .first_delay_ms = CONFIG_CARELINK_INCIDENT_RETRY_FIRST_MS,
-        .maximum_delay_ms = CONFIG_CARELINK_INCIDENT_RETRY_MAX_MS,
-        .maximum_attempts = CONFIG_CARELINK_INCIDENT_MAX_ATTEMPTS,
-    };
-    return config;
+    return s_config.retry;
 }
 
 static esp_err_t transmit_current(void)
@@ -157,7 +157,7 @@ static esp_err_t transmit_current(void)
     if (error == ESP_OK && telemetry.has_location) {
         s_location_sent = true;
         s_next_location_check_ms =
-            now_ms() + CONFIG_CARELINK_INCIDENT_LOCATION_UPDATE_MS;
+            now_ms() + s_config.location_update_ms;
     }
     portENTER_CRITICAL(&s_status_lock);
     ++s_status.transmissions;
@@ -327,7 +327,7 @@ static void maybe_send_location_update(void)
         .local_event_token = token,
     };
     s_next_location_check_ms =
-        now_ms() + CONFIG_CARELINK_INCIDENT_LOCATION_UPDATE_MS;
+        now_ms() + s_config.location_update_ms;
     carelink_retry_reset(&s_retry);
     apply_action(carelink_sos_apply(&s_sos, &event));
 }
@@ -358,7 +358,7 @@ static esp_err_t initialize_service(carelink_sos_action_t *restored_action)
     } else {
         return error;
     }
-    error = carelink_radio_init();
+    error = carelink_radio_init_with_config(&s_config.radio);
     if (error != ESP_OK) {
         return error;
     }
@@ -383,6 +383,9 @@ static void incident_task(void *argument)
         portENTER_CRITICAL(&s_status_lock);
         s_status.running = true;
         s_status.state = s_sos.snapshot.state;
+        s_status.configuration_locked =
+            s_sos.snapshot.state == CARELINK_SOS_ARMING ||
+            is_active_or_pending_cancel();
         portEXIT_CRITICAL(&s_status_lock);
     }
     xTaskNotify(s_start_waiter, (uint32_t)startup_error,
@@ -426,7 +429,11 @@ esp_err_t carelink_incident_start(const carelink_incident_config_t *config)
 {
     if (config == NULL || config->device_id == 0U || config->session_id == 0U ||
         config->key_provider.get_key == NULL || config->get_telemetry == NULL ||
-        config->next_replay_counter == NULL) {
+        config->next_replay_counter == NULL ||
+        !carelink_radio_config_valid(&config->radio) ||
+        !carelink_retry_config_valid(&config->retry) ||
+        config->location_update_ms < 10000U ||
+        config->location_update_ms > 3600000U) {
         return ESP_ERR_INVALID_ARG;
     }
     portENTER_CRITICAL(&s_status_lock);
@@ -435,11 +442,6 @@ esp_err_t carelink_incident_start(const carelink_incident_config_t *config)
     if (already_running || s_button_queue != NULL) {
         return ESP_ERR_INVALID_STATE;
     }
-    const carelink_retry_config_t retries = retry_config();
-    if (!carelink_retry_config_valid(&retries)) {
-        return ESP_ERR_INVALID_ARG;
-    }
-
     s_config = *config;
     memset(&s_status, 0, sizeof(s_status));
     s_status.state = CARELINK_SOS_IDLE;

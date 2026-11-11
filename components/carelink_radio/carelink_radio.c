@@ -96,6 +96,7 @@ enum { RADIO_PIN_FEM_MODE = 5, RADIO_FEM_RX_LEVEL = 0 };
 static const char *TAG = "carelink_radio";
 static spi_device_handle_t s_spi;
 static TaskHandle_t s_owner;
+static carelink_radio_config_t s_config;
 static carelink_radio_status_t s_status = {
     .state = CARELINK_RADIO_STATE_UNINITIALIZED,
     .last_error = ESP_OK,
@@ -114,6 +115,20 @@ static esp_err_t require_owner(void)
         return ESP_ERR_INVALID_STATE;
     }
     return ESP_OK;
+}
+
+bool carelink_radio_config_valid(const carelink_radio_config_t *config)
+{
+    if (config == NULL || config->tx_power_dbm < -9 ||
+        config->tx_power_dbm > 14) {
+        return false;
+    }
+    const uint32_t frequency_hz = config->frequency_hz;
+    return (frequency_hz >= 430000000U && frequency_hz <= 440000000U) ||
+           (frequency_hz >= 470000000U && frequency_hz <= 510000000U) ||
+           (frequency_hz >= 779000000U && frequency_hz <= 787000000U) ||
+           (frequency_hz >= 863000000U && frequency_hz <= 870000000U) ||
+           (frequency_hz >= 902000000U && frequency_hz <= 928000000U);
 }
 
 static esp_err_t validate_profile(void)
@@ -350,25 +365,18 @@ static esp_err_t restore_after_tx(carelink_radio_after_tx_t after_tx)
     return check_radio_mode(2, "after SetStandby");
 }
 
-esp_err_t carelink_radio_init(void)
+esp_err_t carelink_radio_init_with_config(
+    const carelink_radio_config_t *config)
 {
     if (s_status.state != CARELINK_RADIO_STATE_UNINITIALIZED || s_owner != NULL) {
         return ESP_ERR_INVALID_STATE;
     }
     ESP_RETURN_ON_ERROR(validate_profile(), TAG, "invalid radio profile");
     /* Validate before configuring GPIOs or starting the SPI bus. */
-    if (!((CONFIG_CARELINK_RADIO_FREQUENCY_HZ >= 430000000 &&
-           CONFIG_CARELINK_RADIO_FREQUENCY_HZ <= 440000000) ||
-          (CONFIG_CARELINK_RADIO_FREQUENCY_HZ >= 470000000 &&
-           CONFIG_CARELINK_RADIO_FREQUENCY_HZ <= 510000000) ||
-          (CONFIG_CARELINK_RADIO_FREQUENCY_HZ >= 779000000 &&
-           CONFIG_CARELINK_RADIO_FREQUENCY_HZ <= 787000000) ||
-          (CONFIG_CARELINK_RADIO_FREQUENCY_HZ >= 863000000 &&
-           CONFIG_CARELINK_RADIO_FREQUENCY_HZ <= 870000000) ||
-          (CONFIG_CARELINK_RADIO_FREQUENCY_HZ >= 902000000 &&
-           CONFIG_CARELINK_RADIO_FREQUENCY_HZ <= 928000000))) {
+    if (!carelink_radio_config_valid(config)) {
         return ESP_ERR_INVALID_ARG;
     }
+    s_config = *config;
 
     s_owner = xTaskGetCurrentTaskHandle();
     s_status.state = CARELINK_RADIO_STATE_FAULT;
@@ -449,7 +457,7 @@ esp_err_t carelink_radio_init(void)
     const uint8_t packet_type[] = {SX1262_PACKET_TYPE_LORA};
     if ((err = write_command(SX1262_CMD_SET_PACKET_TYPE,
                              packet_type, sizeof(packet_type))) != ESP_OK) goto fail;
-    if ((err = calibrate_image(CONFIG_CARELINK_RADIO_FREQUENCY_HZ)) != ESP_OK) goto fail;
+    if ((err = calibrate_image(s_config.frequency_hz)) != ESP_OK) goto fail;
 
     uint8_t device_errors[2];
     if ((err = read_command(SX1262_CMD_GET_DEVICE_ERRORS,
@@ -461,7 +469,7 @@ esp_err_t carelink_radio_init(void)
         goto fail;
     }
 
-    if ((err = set_frequency(CONFIG_CARELINK_RADIO_FREQUENCY_HZ)) != ESP_OK) goto fail;
+    if ((err = set_frequency(s_config.frequency_hz)) != ESP_OK) goto fail;
     const uint8_t buffer_base[] = {0x00, 0x00};
     if ((err = write_command(SX1262_CMD_SET_BUFFER_BASE_ADDRESS,
                              buffer_base, sizeof(buffer_base))) != ESP_OK) goto fail;
@@ -478,22 +486,31 @@ esp_err_t carelink_radio_init(void)
     /* SX1262 low-power PA operating point (up to +14 dBm), 200 us ramp. */
     const uint8_t pa[] = {0x02, 0x02, 0x00, 0x01};
     if ((err = write_command(SX1262_CMD_SET_PA_CONFIG, pa, sizeof(pa))) != ESP_OK) goto fail;
-    const uint8_t tx_params[] = {(uint8_t)(int8_t)CONFIG_CARELINK_RADIO_TX_POWER_DBM, 0x04};
+    const uint8_t tx_params[] = {(uint8_t)s_config.tx_power_dbm, 0x04};
     if ((err = write_command(SX1262_CMD_SET_TX_PARAMS,
                              tx_params, sizeof(tx_params))) != ESP_OK) goto fail;
 
     s_status.state = CARELINK_RADIO_STATE_STANDBY;
     s_status.last_error = ESP_OK;
     ESP_LOGW(TAG, "raw LoRa at %" PRIu32 " Hz requires deployment-region approval",
-             (uint32_t)CONFIG_CARELINK_RADIO_FREQUENCY_HZ);
+             s_config.frequency_hz);
     ESP_LOGI(TAG, "%s ready: BW125 SF9 CR4/5 preamble8 explicit CRC, TX %d dBm",
-             RADIO_PROFILE_NAME, CONFIG_CARELINK_RADIO_TX_POWER_DBM);
+             RADIO_PROFILE_NAME, s_config.tx_power_dbm);
     return ESP_OK;
 
 fail:
     s_status.state = CARELINK_RADIO_STATE_FAULT;
     s_status.last_error = err;
     return err;
+}
+
+esp_err_t carelink_radio_init(void)
+{
+    const carelink_radio_config_t config = {
+        .frequency_hz = CONFIG_CARELINK_RADIO_FREQUENCY_HZ,
+        .tx_power_dbm = CONFIG_CARELINK_RADIO_TX_POWER_DBM,
+    };
+    return carelink_radio_init_with_config(&config);
 }
 
 esp_err_t carelink_radio_send(const uint8_t *payload, size_t length,
@@ -708,8 +725,21 @@ carelink_radio_status_t carelink_radio_get_status(void)
 
 #else
 
+bool carelink_radio_config_valid(const carelink_radio_config_t *config)
+{
+    (void)config;
+    return false;
+}
+
 esp_err_t carelink_radio_init(void)
 {
+    return ESP_ERR_NOT_SUPPORTED;
+}
+
+esp_err_t carelink_radio_init_with_config(
+    const carelink_radio_config_t *config)
+{
+    (void)config;
     return ESP_ERR_NOT_SUPPORTED;
 }
 

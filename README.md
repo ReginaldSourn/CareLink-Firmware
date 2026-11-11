@@ -142,6 +142,29 @@ base64 MQTT envelope, but its repository still needs authenticated frame
 verification, SX1262 downlink and ACK generation before the pendant can advance
 beyond `ACTIVE_UNCONFIRMED`. See [the wire and ACK contract](docs/sos-protocol.md).
 
+## Secure BLE mobile configuration
+
+The optional **CareLink BLE mobile configuration** service uses ESP-IDF Local
+Control over BLE and Protocomm Security 2. Each pendant advertises as
+`CareLink-XXXXXX` during a bounded boot-time window and requires its own
+manufacturing-provisioned username/password. Empty, short or malformed
+credentials fail closed; there is no shared or compiled fallback credential.
+
+An authenticated mobile client can read or atomically replace the complete
+runtime configuration: OLED enabled state, raw-LoRa frequency and TX power,
+retry delays/count, confirmed-incident location interval, and GNSS freshness.
+The value is strictly validated, written to a redundant CRC-protected NVS
+journal, and applied after an automatic restart. Invalid or corrupt records use
+safe firmware defaults. Writes are rejected while SOS delivery or cancellation
+is active. See [the mobile integration contract](docs/mobile-configuration.md)
+for the Local Control property, exact 28-byte format and accepted ranges.
+
+Board/RF-front-end selection, GPIO wiring, SOS button polarity, BLE onboarding
+credentials and the LoRa HMAC key cannot be changed through BLE. Before enabling
+the service, select NimBLE under ESP-IDF Bluetooth options and configure unique
+Security 2 credentials. Production devices should use flash/NVS encryption and
+secure boot; the BLE session protects settings in transit, not plaintext flash.
+
 ## LSM6DSO IMU
 
 Support targets **LSM6DSO (letter O)**, not LSM6DS0 (zero). It checks the
@@ -206,8 +229,10 @@ IMU or connected serial device was available for validation here.
 ```text
 components/
   carelink_auth/    HMAC-SHA-256 frame signing and verification
+  carelink_ble_config/ Secure Security-2 mobile configuration service
   carelink_board/   Heltec variant, pin validation, power and battery monitor
   carelink_button/  Debounced hold/stuck detection for a dedicated SOS input
+  carelink_config/  Runtime settings codec and redundant CRC-protected NVS store
   carelink_incident/ Runtime owner for button, journal, radio, ACK and retry flow
   carelink_incident_policy/ Pure message, ACK and backoff rules
   carelink_nmea/    Allocation-free streaming parser; independent of ESP-IDF
@@ -224,6 +249,7 @@ main/              CareLink startup, diagnostic consumer and GPS screen layout
 docs/hardware.md   Manufacturer research and wiring decisions
 docs/imu-design.md IMU architecture and integration details
 docs/sos-protocol.md CareLink/Rolork wire, security and ACK contract
+docs/mobile-configuration.md BLE security, property and runtime settings contract
 tests/             Native C parser, IMU, transport lifecycle and display tests
 sdkconfig.defaults ESP32-S3, flash and USB defaults
 ```
@@ -275,5 +301,8 @@ pair, cancellation recovery, protocol mutation rejection, HMAC vectors and
 fail-closed key providers, journal corruption/generation wrap, replay-counter
 reservation, retry-time wrap, ACK matching, and all three radio profiles at
 100 Hz and 1 kHz RTOS tick rates. The enabled SOS configuration is also
-cross-compiled as a complete ESP32-S3 image.
+cross-compiled as a complete ESP32-S3 image. Runtime-configuration tests cover
+field bounds, exact little-endian encoding, reserved-byte rejection, CRC
+corruption and generation wrap. BLE-disabled and fully enabled BLE/SOS/radio
+configurations are cross-compiled separately.
 Build/tests do not verify electrical compatibility or live satellite fixes.
