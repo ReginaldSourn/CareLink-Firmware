@@ -1,65 +1,114 @@
 #include "carelink_display.h"
 
-#include <inttypes.h>
-#include <stdio.h>
+#include <stddef.h>
 
+#include "carelink_display_format.h"
 #include "carelink_oled.h"
 #include "esp_log.h"
-#include "esp_timer.h"
 
 static bool ready;
 static const char *TAG = "display";
 
+_Static_assert(CARELINK_DISPLAY_ROWS == CARELINK_OLED_ROWS,
+               "display formatter and OLED row counts must match");
+_Static_assert(CARELINK_DISPLAY_COLUMNS == CARELINK_OLED_COLUMNS,
+               "display formatter and OLED column counts must match");
+
 static void show(const char *const lines[], size_t count)
 {
-    if (!ready) return;
-    esp_err_t err = carelink_oled_show_lines(lines, count);
-    if (err != ESP_OK) {
-        ESP_LOGW(TAG, "OLED update failed: %s; GPS continues over USB", esp_err_to_name(err));
-        ready = false; /* Avoid flooding logs with a failed display on every loop. */
+    if (!ready) {
+        return;
+    }
+    const esp_err_t error = carelink_oled_show_lines(lines, count);
+    if (error != ESP_OK) {
+        ESP_LOGW(TAG, "OLED update failed: %s; status continues over USB",
+                 esp_err_to_name(error));
+        ready = false; /* Avoid flooding logs after a display failure. */
+    }
+}
+
+static void show_view(const carelink_display_view_t *view)
+{
+    char text[CARELINK_DISPLAY_ROWS][CARELINK_DISPLAY_COLUMNS + 1U];
+    const char *lines[CARELINK_DISPLAY_ROWS];
+    carelink_display_format(view, text);
+    for (size_t row = 0; row < CARELINK_DISPLAY_ROWS; ++row) {
+        lines[row] = text[row];
+    }
+    show(lines, CARELINK_DISPLAY_ROWS);
+}
+
+static carelink_display_gps_t gps_state(
+    const carelink_display_status_t *status)
+{
+    if (!status->gps_available) {
+        return CARELINK_DISPLAY_GPS_OFFLINE;
+    }
+    switch (status->gps.state) {
+    case CARELINK_GPS_FIXED:
+        return CARELINK_DISPLAY_GPS_READY;
+    case CARELINK_GPS_SEARCHING:
+        return CARELINK_DISPLAY_GPS_SEARCHING;
+    case CARELINK_GPS_STALE:
+        return CARELINK_DISPLAY_GPS_STALE;
+    case CARELINK_GPS_NO_DATA:
+    case CARELINK_GPS_INVALID_DATA:
+    default:
+        return CARELINK_DISPLAY_GPS_CHECK;
+    }
+}
+
+static carelink_display_sos_t sos_state(
+    const carelink_display_status_t *status)
+{
+    if (!status->incident_available || !status->incident.running) {
+        return CARELINK_DISPLAY_SOS_UNAVAILABLE;
+    }
+    switch (status->incident.state) {
+    case CARELINK_SOS_IDLE:
+        return CARELINK_DISPLAY_SOS_READY;
+    case CARELINK_SOS_ARMING:
+        return CARELINK_DISPLAY_SOS_ARMING;
+    case CARELINK_SOS_ACTIVE_UNCONFIRMED:
+        return CARELINK_DISPLAY_SOS_SENDING;
+    case CARELINK_SOS_RADIO_RECEIVED:
+        return CARELINK_DISPLAY_SOS_GATEWAY_RECEIVED;
+    case CARELINK_SOS_CLOUD_ACCEPTED:
+        return CARELINK_DISPLAY_SOS_CLOUD_ACCEPTED;
+    case CARELINK_SOS_CAREGIVER_ACKNOWLEDGED:
+        return CARELINK_DISPLAY_SOS_CAREGIVER_ACKNOWLEDGED;
+    case CARELINK_SOS_RESOLVED:
+        return CARELINK_DISPLAY_SOS_RESOLVED;
+    case CARELINK_SOS_CANCELLED:
+        return status->incident.configuration_locked
+                   ? CARELINK_DISPLAY_SOS_CANCELLING
+                   : CARELINK_DISPLAY_SOS_CANCELLED;
+    default:
+        return CARELINK_DISPLAY_SOS_UNAVAILABLE;
     }
 }
 
 void carelink_display_start(void)
 {
-    esp_err_t err = carelink_oled_init();
-    ready = err == ESP_OK;
-    if (err != ESP_OK && err != ESP_ERR_NOT_SUPPORTED) {
-        ESP_LOGW(TAG, "OLED unavailable: %s; GPS continues over USB", esp_err_to_name(err));
+    const esp_err_t error = carelink_oled_init();
+    ready = error == ESP_OK;
+    if (error != ESP_OK && error != ESP_ERR_NOT_SUPPORTED) {
+        ESP_LOGW(TAG, "OLED unavailable: %s; status continues over USB",
+                 esp_err_to_name(error));
     }
-    const char *lines[] = {"CARELINK GPS", "", "STARTING GNSS..."};
-    show(lines, 3);
+    show_view(NULL);
 }
 
-void carelink_display_gps_error(void)
+void carelink_display_update(const carelink_display_status_t *status)
 {
-    const char *lines[] = {"CARELINK GPS", "GPS START FAILED", "CHECK CONFIGURATION", "SEE USB LOG"};
-    show(lines, 4);
-}
-
-void carelink_display_gps(const carelink_gps_snapshot_t *gps)
-{
-    if (!ready || !gps) return;
-    char text[CARELINK_OLED_ROWS][CARELINK_OLED_COLUMNS + 1] = {0};
-    const char *lines[CARELINK_OLED_ROWS];
-    for (size_t i = 0; i < CARELINK_OLED_ROWS; ++i) lines[i] = text[i];
-    snprintf(text[0], sizeof(text[0]), "CARELINK GPS");
-    snprintf(text[1], sizeof(text[1]), "%s", carelink_gps_state_name(gps->state));
-    if (gps->state == CARELINK_GPS_FIXED) {
-        snprintf(text[2], sizeof(text[2]), "LAT %+.6f", gps->fix.latitude_deg);
-        snprintf(text[3], sizeof(text[3]), "LON %+.6f", gps->fix.longitude_deg);
-        if (gps->fix.has_altitude) snprintf(text[4], sizeof(text[4]), "ALT %.1f M", gps->fix.altitude_m);
-        if (gps->fix.has_speed) snprintf(text[4], sizeof(text[4]), "SPEED %.2f M/S", gps->fix.speed_mps);
-        if (gps->fix.has_hdop) snprintf(text[5], sizeof(text[5]), "SAT %u HDOP %.1f", gps->fix.satellites, gps->fix.hdop);
-        int64_t age_ms = esp_timer_get_time() / 1000 - gps->fix_report_ms;
-        snprintf(text[6], sizeof(text[6]), "AGE %.1f S", (double)age_ms / 1000.0);
-    } else {
-        snprintf(text[2], sizeof(text[2]), "%s", gps->state == CARELINK_GPS_NO_DATA ? "CHECK POWER / TX" : "WAITING FOR POSITION");
-        snprintf(text[3], sizeof(text[3]), "%s", gps->state == CARELINK_GPS_INVALID_DATA ? "CHECK BAUD / WIRING" : "USE OPEN SKY");
-        snprintf(text[4], sizeof(text[4]), "RX %" PRIu32 " B", gps->bytes_received);
-        snprintf(text[5], sizeof(text[5]), "NMEA OK %" PRIu32, gps->accepted_sentences);
-        snprintf(text[6], sizeof(text[6]), "NMEA BAD %" PRIu32, gps->rejected_sentences);
+    if (!ready || status == NULL) {
+        return;
     }
-    snprintf(text[7], sizeof(text[7]), "UART ERR %" PRIu32, gps->uart_errors);
-    show(lines, CARELINK_OLED_ROWS);
+    const carelink_display_view_t view = {
+        .sos = sos_state(status),
+        .gps = gps_state(status),
+        .battery_available = status->battery_available,
+        .battery_mv = status->battery_mv,
+    };
+    show_view(&view);
 }

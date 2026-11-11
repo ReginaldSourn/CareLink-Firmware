@@ -24,11 +24,24 @@ static const char *TAG = "carelink";
 #if CONFIG_CARELINK_INCIDENT_ENABLED
 typedef struct {
     carelink_security_t security;
-    bool battery_ready;
+    portMUX_TYPE telemetry_lock;
+    uint16_t battery_mv;
+    bool battery_valid;
     bool gps_ready;
 } app_incident_context_t;
 
-static app_incident_context_t incident_context;
+static app_incident_context_t incident_context = {
+    .telemetry_lock = portMUX_INITIALIZER_UNLOCKED,
+};
+
+static void update_incident_battery(bool valid, uint32_t battery_mv)
+{
+    portENTER_CRITICAL(&incident_context.telemetry_lock);
+    incident_context.battery_valid = valid;
+    incident_context.battery_mv =
+        battery_mv > UINT16_MAX ? UINT16_MAX : (uint16_t)battery_mv;
+    portEXIT_CRITICAL(&incident_context.telemetry_lock);
+}
 
 static esp_err_t get_incident_telemetry(
     void *context,
@@ -43,12 +56,12 @@ static esp_err_t get_incident_telemetry(
                                : CARELINK_GNSS_UNAVAILABLE,
         .location_age_s = CARELINK_PROTOCOL_LOCATION_AGE_UNKNOWN,
     };
-    if (app->battery_ready) {
-        uint32_t battery_mv = 0U;
-        if (carelink_board_battery_read_mv(&battery_mv) == ESP_OK) {
-            telemetry->battery_mv =
-                battery_mv > UINT16_MAX ? UINT16_MAX : (uint16_t)battery_mv;
-        }
+    portENTER_CRITICAL(&app->telemetry_lock);
+    const bool battery_valid = app->battery_valid;
+    const uint16_t battery_mv = app->battery_mv;
+    portEXIT_CRITICAL(&app->telemetry_lock);
+    if (battery_valid) {
+        telemetry->battery_mv = battery_mv;
     }
     if (!app->gps_ready) {
         return ESP_OK;
@@ -117,6 +130,9 @@ void app_main(void)
     } else {
         ESP_LOGE(TAG, "NVS initialization failed: %s", esp_err_to_name(err));
     }
+#if !CONFIG_CARELINK_INCIDENT_ENABLED && !CONFIG_CARELINK_BLE_CONFIG_ENABLED
+    (void)nvs_ready;
+#endif
 
     esp_err_t battery_err = carelink_board_battery_init();
     bool battery_ready = battery_err == ESP_OK;
@@ -130,9 +146,6 @@ void app_main(void)
     bool gps_ready = err == ESP_OK;
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "GPS start failed: %s; check CareLink menuconfig", esp_err_to_name(err));
-        if (runtime_config.oled_enabled) {
-            carelink_display_gps_error();
-        }
     }
     err = carelink_imu_start();
     bool imu_ready = err == ESP_OK;
@@ -143,8 +156,12 @@ void app_main(void)
 
     bool incident_ready = false;
 #if CONFIG_CARELINK_INCIDENT_ENABLED
-    incident_context.battery_ready = battery_ready;
     incident_context.gps_ready = gps_ready;
+    uint32_t initial_battery_mv = 0U;
+    const bool initial_battery_available =
+        battery_ready &&
+        carelink_board_battery_read_mv(&initial_battery_mv) == ESP_OK;
+    update_incident_battery(initial_battery_available, initial_battery_mv);
     err = nvs_ready ? ESP_OK : ESP_ERR_INVALID_STATE;
     if (err == ESP_OK) {
         err = carelink_security_init(&incident_context.security);
@@ -195,20 +212,25 @@ void app_main(void)
 #endif
 
     while (true) {
-        if (battery_ready && !incident_ready) {
-            uint32_t battery_mv = 0;
+        uint32_t battery_mv = 0U;
+        bool battery_sample_available = false;
+        if (battery_ready) {
             battery_err = carelink_board_battery_read_mv(&battery_mv);
             if (battery_err == ESP_OK) {
+                battery_sample_available = true;
                 ESP_LOGI(TAG, "Battery: %.3f V", (double)battery_mv / 1000.0);
             } else {
                 ESP_LOGW(TAG, "Battery read failed: %s", esp_err_to_name(battery_err));
             }
         }
-        carelink_gps_snapshot_t gps;
-        if (gps_ready && carelink_gps_get_snapshot(&gps) == ESP_OK) {
-            if (runtime_config.oled_enabled) {
-                carelink_display_gps(&gps);
-            }
+#if CONFIG_CARELINK_INCIDENT_ENABLED
+        update_incident_battery(battery_sample_available, battery_mv);
+#endif
+
+        carelink_gps_snapshot_t gps = {0};
+        const bool gps_sample_available =
+            gps_ready && carelink_gps_get_snapshot(&gps) == ESP_OK;
+        if (gps_sample_available) {
             if (gps.state == CARELINK_GPS_FIXED) {
                 ESP_LOGI(TAG, "GPS %s: lat=%.6f lon=%.6f age=%" PRId64 "ms",
                          gps.fix.sentence_type, gps.fix.latitude_deg, gps.fix.longitude_deg,
@@ -222,6 +244,21 @@ void app_main(void)
                          carelink_gps_state_name(gps.state), gps.bytes_received,
                          gps.accepted_sentences, gps.rejected_sentences, gps.uart_errors);
             }
+        }
+        carelink_incident_status_t incident = {0};
+        if (incident_ready) {
+            incident = carelink_incident_get_status();
+        }
+        if (runtime_config.oled_enabled) {
+            const carelink_display_status_t display_status = {
+                .gps = gps,
+                .incident = incident,
+                .battery_mv = battery_mv,
+                .gps_available = gps_sample_available,
+                .incident_available = incident_ready,
+                .battery_available = battery_sample_available,
+            };
+            carelink_display_update(&display_status);
         }
         carelink_imu_snapshot_t imu;
         if (imu_ready && carelink_imu_get_snapshot(&imu) == ESP_OK) {

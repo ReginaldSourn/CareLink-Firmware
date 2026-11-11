@@ -91,10 +91,10 @@ Arduino/LVGL dependency is needed for the onboard screen.
 
 Under **Component config → CareLink OLED**, disable the display for a headless
 board or enable **Rotate OLED by 180 degrees** for the opposite orientation.
-The screen refreshes once per second with status, signed coordinates, available
-altitude or speed, and fix age. GGA reports can show satellite count and HDOP;
-RMC reports do not carry those fields. The receiver-health counters appear
-while waiting for a fix. Expired/invalid coordinates are removed from the screen.
+The screen is intentionally limited to information a wearer needs: the current
+SOS delivery stage and next action, simple GPS readiness, and battery voltage
+when the board supports it. Coordinates, fix age, satellite data, NMEA counters,
+and hardware diagnostics remain in the USB serial log for technicians.
 
 The R2 firmware also reports battery-terminal voltage over USB once per second.
 It drives GPIO37 high only while sampling GPIO1, waits for the switched
@@ -295,8 +295,9 @@ remain enabled. The parser itself performs no heap allocations.
 Tests cover known-checksum fixtures, split input, hemispheres, coordinate
 bounds, zero coordinates, no-fix reports, malformed numeric fields, corrupt and
 overlong input, arbitrary-byte stress, recovery and freshness boundaries.
-OLED tests check framebuffer bounds, clipping, character fallback and clearing
-old coordinate rows. A rendered sample screen was also inspected locally.
+OLED tests check key user-status formats, framebuffer bounds,
+clipping, character fallback and clearing unused rows. A rendered sample screen
+was also inspected locally.
 IMU tests use a mocked register transport to check identity rejection, reset
 timeout, each startup transfer failure, readiness, signed conversion, scales,
 partial-read failures and retries. State tests check freshness boundaries and

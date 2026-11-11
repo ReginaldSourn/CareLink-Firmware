@@ -16,8 +16,12 @@ if(CARELINK_SANITIZE)
 endif()
 add_test(NAME gps_parser_and_freshness COMMAND test_gps)
 
-add_executable(test_oled test_oled.c ../components/carelink_oled/oled_text.c)
-target_include_directories(test_oled PRIVATE ../components/carelink_oled)
+add_executable(test_oled test_oled.c
+    ../main/carelink_display_format.c
+    ../components/carelink_oled/oled_text.c)
+target_include_directories(test_oled PRIVATE
+    ../main/include
+    ../components/carelink_oled)
 target_compile_features(test_oled PRIVATE c_std_11)
 target_compile_options(test_oled PRIVATE -Wall -Wextra -Werror -Wpedantic -UNDEBUG)
 if(CARELINK_SANITIZE)
