@@ -18,25 +18,29 @@ protected at rest by this component alone.
 
 - BLE service UUID bytes: `4c 68 8a f2 38 47 4e b1 99 4b 21 66 43 4c 01 00`
 - Protocomm security: version 2
-- Property name: `carelink_config`
-- Property type: `1`
-- Property access: read/write
-- Property size: exactly 28 bytes
+
+| Property | Type | Access | Size | Purpose |
+| --- | ---: | --- | ---: | --- |
+| `carelink_config` | 1 | read/write | 28 bytes | Applied runtime settings and atomic replacement |
+| `carelink_status` | 2 | read only | 12 bytes | SOS lock, apply state, source and build capabilities |
+| `carelink_control` | 3 | read/command | 4 bytes | Restore firmware default values |
 
 The mobile application should use ESP-IDF Protocomm/Local Control framing. It
-must establish a Security 2 session before reading or writing the property. A
-valid write is committed to the inactive NVS slot, verified by the firmware on
-the next boot, and followed by an automatic restart after approximately 1.5
-seconds. The client should treat connection loss after a successful response as
-the expected restart.
+must establish a Security 2 session before reading or writing the properties.
+Property flag bit 0 marks a read-only property and bit 1 marks a command
+property. A valid write is committed to the inactive NVS slot, verified by the
+firmware on the next boot, and followed by an automatic restart after
+approximately 1.5 seconds. The client should treat connection loss after a
+successful response as the expected restart.
 
+The client should read `carelink_status` before presenting controls or writing.
 Writes are rejected while an SOS is arming, active, or has an unacknowledged
 cancellation. This prevents a mobile configuration restart or frequency change
 from interrupting emergency delivery. If an SOS starts during the short restart
 delay, the restart is postponed and the saved settings take effect on the next
 normal reboot. Reading the current value remains safe.
 
-## Version 1 value
+## Configuration value version 1
 
 All multibyte integers are unsigned little-endian. Reserved bytes must be zero.
 
@@ -62,6 +66,42 @@ The read response returns the settings applied during the current boot. A write
 is all-or-nothing: wrong size/version, unknown flags, nonzero reserved bytes,
 unsupported frequency, or an out-of-range field rejects the entire value and
 does not change NVS.
+
+## Status value version 1
+
+Status is a read-only snapshot. All multibyte integers are unsigned
+little-endian.
+
+| Offset | Size | Field | Meaning |
+| ---: | ---: | --- | --- |
+| 0 | 1 | version | `1` |
+| 1 | 1 | flags | bit 0 configuration locked by SOS; bit 1 restart pending; bit 2 settings saved but restart deferred; bit 3 incident service running |
+| 2 | 1 | configuration wire version | currently `1` |
+| 3 | 1 | configuration source | `0` firmware defaults, `1` valid runtime record, `2` recovery defaults after corrupt records |
+| 4 | 1 | SOS state | `0` idle, `1` arming, `2` active/unconfirmed, `3` radio received, `4` cloud accepted, `5` caregiver acknowledged, `6` resolved, `7` cancelled |
+| 5 | 3 | reserved | zero |
+| 8 | 4 | capabilities | bitmask described below |
+
+Capability bits describe what the installed firmware can actually apply. The
+client must hide or disable unsupported fields: bit 0 OLED runtime switch, bit
+1 raw-LoRa radio settings, bit 2 incident retry/location policy, bit 3 GNSS
+freshness, and bit 4 restore defaults. For example, an OLED-free build reports
+bit 0 clear and rejects attempts to enable the OLED.
+
+`restart pending` means a valid configuration has been saved and the normal
+1.5-second restart is scheduled. `apply deferred` means the settings are still
+safe in NVS but the automatic restart was suppressed by an SOS or could not be
+scheduled; they take effect on the next normal reboot.
+
+## Control value version 1
+
+Reading `carelink_control` returns `01 00 00 00` (no command). To restore the
+firmware's compiled default values, write `01 01 00 00`: version 1, restore
+defaults opcode 1, and two reserved zero bytes. Unknown versions, opcodes and
+nonzero reserved bytes are rejected. Restore uses the same SOS lock, atomic NVS
+commit and delayed-restart behavior as a configuration write. The restored
+values are recorded as a valid runtime configuration, so the status source is
+`1` after restart.
 
 ## Deliberately excluded settings
 

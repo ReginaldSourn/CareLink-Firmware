@@ -8,6 +8,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "carelink_ble_protocol.h"
 #include "carelink_config.h"
 #include "carelink_incident.h"
 #include "esp_local_ctrl.h"
@@ -23,7 +24,15 @@ enum {
     RESTART_DELAY_MS = 1500,
     SEC2_SALT_SIZE = 16,
     PROPERTY_TYPE_CARELINK_CONFIG = 1,
+    PROPERTY_TYPE_CARELINK_STATUS = 2,
+    PROPERTY_TYPE_CARELINK_CONTROL = 3,
+    PROPERTY_FLAG_READ_ONLY = 1 << 0,
+    PROPERTY_FLAG_COMMAND = 1 << 1,
 };
+
+static char PROPERTY_CONFIG[] = "carelink_config";
+static char PROPERTY_STATUS[] = "carelink_status";
+static char PROPERTY_CONTROL[] = "carelink_control";
 
 typedef enum {
     SERVICE_STOPPED = 0,
@@ -40,7 +49,9 @@ static int s_sec2_verifier_size;
 static portMUX_TYPE s_state_lock = portMUX_INITIALIZER_UNLOCKED;
 static service_state_t s_service_state;
 static bool s_commit_pending;
+static bool s_apply_deferred;
 static carelink_runtime_config_t s_current_config;
+static carelink_config_source_t s_config_source;
 
 static void release_security2(void)
 {
@@ -72,6 +83,7 @@ static void restart_task(void *argument)
         ESP_LOGW(TAG, "SOS became active; postponing configuration restart");
         portENTER_CRITICAL(&s_state_lock);
         s_commit_pending = false;
+        s_apply_deferred = true;
         portEXIT_CRITICAL(&s_state_lock);
         vTaskDelete(NULL);
         return;
@@ -103,49 +115,122 @@ static void close_window_task(void *argument)
     vTaskDelete(NULL);
 }
 
+static uint32_t configuration_capabilities(void)
+{
+    uint32_t capabilities = CARELINK_BLE_CAPABILITY_GNSS_FRESHNESS |
+                            CARELINK_BLE_CAPABILITY_RESTORE_DEFAULTS;
+#if CONFIG_CARELINK_OLED_ENABLED
+    capabilities |= CARELINK_BLE_CAPABILITY_OLED;
+#endif
+#if CONFIG_CARELINK_RADIO_ENABLED
+    capabilities |= CARELINK_BLE_CAPABILITY_RAW_LORA;
+#endif
+#if CONFIG_CARELINK_INCIDENT_ENABLED
+    capabilities |= CARELINK_BLE_CAPABILITY_INCIDENT_POLICY;
+#endif
+    return capabilities;
+}
+
+static void release_property_values(size_t count,
+                                    esp_local_ctrl_prop_val_t values[])
+{
+    for (size_t index = 0U; index < count; ++index) {
+        free(values[index].data);
+        memset(&values[index], 0, sizeof(values[index]));
+    }
+}
+
+static esp_err_t encode_property(const char *name,
+                                 esp_local_ctrl_prop_val_t *value)
+{
+    if (name == NULL || value == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    size_t size;
+    if (strcmp(name, PROPERTY_CONFIG) == 0) {
+        size = CARELINK_CONFIG_WIRE_SIZE;
+    } else if (strcmp(name, PROPERTY_STATUS) == 0) {
+        size = CARELINK_BLE_STATUS_WIRE_SIZE;
+    } else if (strcmp(name, PROPERTY_CONTROL) == 0) {
+        size = CARELINK_BLE_CONTROL_WIRE_SIZE;
+    } else {
+        return ESP_ERR_INVALID_ARG;
+    }
+    uint8_t *encoded = calloc(size, 1U);
+    if (encoded == NULL) {
+        return ESP_ERR_NO_MEM;
+    }
+
+    bool encoded_ok = false;
+    if (strcmp(name, PROPERTY_CONFIG) == 0) {
+        encoded_ok = carelink_config_wire_encode(&s_current_config, encoded) ==
+                     CARELINK_CONFIG_CODEC_OK;
+    } else if (strcmp(name, PROPERTY_STATUS) == 0) {
+        const carelink_incident_status_t incident =
+            carelink_incident_get_status();
+        portENTER_CRITICAL(&s_state_lock);
+        const bool restart_pending = s_commit_pending;
+        const bool apply_deferred = s_apply_deferred;
+        portEXIT_CRITICAL(&s_state_lock);
+        const carelink_ble_status_t status = {
+            .config_wire_version = CARELINK_CONFIG_WIRE_VERSION,
+            .config_source = (uint8_t)s_config_source,
+            .incident_state = (uint8_t)incident.state,
+            .capabilities = configuration_capabilities(),
+            .configuration_locked = incident.configuration_locked,
+            .restart_pending = restart_pending,
+            .apply_deferred = apply_deferred,
+            .incident_running = incident.running,
+        };
+        encoded_ok = carelink_ble_status_encode(&status, encoded) ==
+                     CARELINK_BLE_PROTOCOL_OK;
+    } else {
+        encoded_ok = carelink_ble_control_encode(CARELINK_BLE_CONTROL_NONE,
+                                                 encoded) ==
+                     CARELINK_BLE_PROTOCOL_OK;
+    }
+    if (!encoded_ok) {
+        free(encoded);
+        return ESP_ERR_INVALID_STATE;
+    }
+    value->data = encoded;
+    value->size = size;
+    value->free_fn = free;
+    return ESP_OK;
+}
+
 static esp_err_t get_property_values(size_t property_count,
                                      const esp_local_ctrl_prop_t properties[],
                                      esp_local_ctrl_prop_val_t values[],
                                      void *context)
 {
     (void)context;
-    if (property_count != 1U || properties == NULL || values == NULL ||
-        strcmp(properties[0].name, "carelink_config") != 0) {
+    if (property_count == 0U || properties == NULL || values == NULL) {
         return ESP_ERR_INVALID_ARG;
     }
-    uint8_t *encoded = malloc(CARELINK_CONFIG_WIRE_SIZE);
-    if (encoded == NULL) {
-        return ESP_ERR_NO_MEM;
+    memset(values, 0, property_count * sizeof(values[0]));
+    for (size_t index = 0U; index < property_count; ++index) {
+        const esp_err_t error = encode_property(properties[index].name,
+                                                &values[index]);
+        if (error != ESP_OK) {
+            release_property_values(index, values);
+            return error;
+        }
     }
-    if (carelink_config_wire_encode(&s_current_config, encoded) !=
-        CARELINK_CONFIG_CODEC_OK) {
-        free(encoded);
-        return ESP_ERR_INVALID_STATE;
-    }
-    values[0].data = encoded;
-    values[0].size = CARELINK_CONFIG_WIRE_SIZE;
-    values[0].free_fn = free;
     return ESP_OK;
 }
 
-static esp_err_t set_property_values(
-    size_t property_count,
-    const esp_local_ctrl_prop_t properties[],
-    const esp_local_ctrl_prop_val_t values[],
-    void *context)
+static esp_err_t stage_configuration(const carelink_runtime_config_t *candidate)
 {
-    (void)context;
-    if (property_count != 1U || properties == NULL || values == NULL ||
-        strcmp(properties[0].name, "carelink_config") != 0) {
+    if (candidate == NULL) {
         return ESP_ERR_INVALID_ARG;
     }
-    carelink_runtime_config_t candidate;
-    if (carelink_config_wire_decode(values[0].data, values[0].size,
-                                    &candidate) !=
-        CARELINK_CONFIG_CODEC_OK) {
-        ESP_LOGW(TAG, "rejected invalid mobile configuration payload");
-        return ESP_ERR_INVALID_ARG;
+#if !CONFIG_CARELINK_OLED_ENABLED
+    if (candidate->oled_enabled) {
+        ESP_LOGW(TAG, "OLED enable rejected because driver is not in this build");
+        return ESP_ERR_NOT_SUPPORTED;
     }
+#endif
     if (carelink_incident_get_status().configuration_locked) {
         ESP_LOGW(TAG, "configuration change rejected while SOS is active");
         return ESP_ERR_INVALID_STATE;
@@ -157,9 +242,10 @@ static esp_err_t set_property_values(
         return ESP_ERR_INVALID_STATE;
     }
     s_commit_pending = true;
+    s_apply_deferred = false;
     portEXIT_CRITICAL(&s_state_lock);
 
-    esp_err_t error = carelink_config_save(&candidate);
+    esp_err_t error = carelink_config_save(candidate);
     if (error != ESP_OK) {
         portENTER_CRITICAL(&s_state_lock);
         s_commit_pending = false;
@@ -172,12 +258,49 @@ static esp_err_t set_property_values(
                     NULL) != pdPASS) {
         portENTER_CRITICAL(&s_state_lock);
         s_commit_pending = false;
+        s_apply_deferred = true;
         portEXIT_CRITICAL(&s_state_lock);
         ESP_LOGE(TAG, "configuration saved but restart task creation failed");
         return ESP_ERR_NO_MEM;
     }
     ESP_LOGI(TAG, "mobile configuration committed; restart scheduled");
     return ESP_OK;
+}
+
+static esp_err_t set_property_values(
+    size_t property_count,
+    const esp_local_ctrl_prop_t properties[],
+    const esp_local_ctrl_prop_val_t values[],
+    void *context)
+{
+    (void)context;
+    if (property_count != 1U || properties == NULL || values == NULL ||
+        properties[0].name == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    carelink_runtime_config_t candidate;
+    if (strcmp(properties[0].name, PROPERTY_CONFIG) == 0) {
+        if (carelink_config_wire_decode(values[0].data, values[0].size,
+                                        &candidate) !=
+            CARELINK_CONFIG_CODEC_OK) {
+            ESP_LOGW(TAG, "rejected invalid mobile configuration payload");
+            return ESP_ERR_INVALID_ARG;
+        }
+    } else if (strcmp(properties[0].name, PROPERTY_CONTROL) == 0) {
+        carelink_ble_control_command_t command;
+        if (carelink_ble_control_decode(values[0].data, values[0].size,
+                                        &command) !=
+                CARELINK_BLE_PROTOCOL_OK ||
+            command != CARELINK_BLE_CONTROL_RESTORE_DEFAULTS) {
+            ESP_LOGW(TAG, "rejected invalid mobile control command");
+            return ESP_ERR_INVALID_ARG;
+        }
+        carelink_config_defaults(&candidate);
+    } else {
+        return ESP_ERR_INVALID_ARG;
+    }
+    return stage_configuration(&candidate);
 }
 
 static esp_err_t prepare_security2(protocomm_security2_params_t *parameters)
@@ -229,6 +352,8 @@ esp_err_t carelink_ble_config_start(void)
     if (error != ESP_OK) {
         goto fail;
     }
+    s_config_source = source;
+    s_apply_deferred = false;
     error = prepare_security2(&security2);
     if (error != ESP_OK) {
         ESP_LOGE(TAG, "BLE disabled: unique Security 2 credentials are invalid");
@@ -258,22 +383,39 @@ esp_err_t carelink_ble_config_start(void)
             .get_prop_values = get_property_values,
             .set_prop_values = set_property_values,
         },
-        .max_properties = 1,
+        .max_properties = 3,
     };
     error = esp_local_ctrl_start(&local_control);
     if (error != ESP_OK) {
         goto fail;
     }
-    const esp_local_ctrl_prop_t property = {
-        .name = "carelink_config",
-        .type = PROPERTY_TYPE_CARELINK_CONFIG,
-        .size = CARELINK_CONFIG_WIRE_SIZE,
-        .flags = 0,
+    const esp_local_ctrl_prop_t properties[] = {
+        {
+            .name = PROPERTY_CONFIG,
+            .type = PROPERTY_TYPE_CARELINK_CONFIG,
+            .size = CARELINK_CONFIG_WIRE_SIZE,
+            .flags = 0,
+        },
+        {
+            .name = PROPERTY_STATUS,
+            .type = PROPERTY_TYPE_CARELINK_STATUS,
+            .size = CARELINK_BLE_STATUS_WIRE_SIZE,
+            .flags = PROPERTY_FLAG_READ_ONLY,
+        },
+        {
+            .name = PROPERTY_CONTROL,
+            .type = PROPERTY_TYPE_CARELINK_CONTROL,
+            .size = CARELINK_BLE_CONTROL_WIRE_SIZE,
+            .flags = PROPERTY_FLAG_COMMAND,
+        },
     };
-    error = esp_local_ctrl_add_property(&property);
-    if (error != ESP_OK) {
-        esp_local_ctrl_stop();
-        goto fail;
+    for (size_t index = 0U; index < sizeof(properties) / sizeof(properties[0]);
+         ++index) {
+        error = esp_local_ctrl_add_property(&properties[index]);
+        if (error != ESP_OK) {
+            esp_local_ctrl_stop();
+            goto fail;
+        }
     }
     portENTER_CRITICAL(&s_state_lock);
     s_service_state = SERVICE_STARTED;

@@ -148,9 +148,11 @@ endif()
 add_test(NAME carelink_security_storage COMMAND test_security)
 
 add_executable(test_config test_config.c
-    ../components/carelink_config/carelink_config_codec.c)
+    ../components/carelink_config/carelink_config_codec.c
+    ../components/carelink_ble_config/carelink_ble_protocol.c)
 target_include_directories(test_config PRIVATE
-    ../components/carelink_config/include)
+    ../components/carelink_config/include
+    ../components/carelink_ble_config/include)
 target_compile_features(test_config PRIVATE c_std_11)
 target_compile_options(test_config PRIVATE
     -Wall -Wextra -Werror -Wpedantic -UNDEBUG)

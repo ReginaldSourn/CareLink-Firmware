@@ -13,6 +13,8 @@ Defaults assume the **V4 R2 board and its GNSS socket**. The exact L76C
 breakout, wiring and board revision have not been confirmed. Select R8 in
 `menuconfig` if your board is marked ESP32-S3R8; its power control pin differs.
 See [hardware research and sources](docs/hardware.md).
+For a complete breadboard BOM, GPIO allocation and connection sequence, use the
+[CareLink V4 prototype wiring guide](docs/prototype-wiring.md).
 
 | Signal | Default connection |
 | --- | --- |
@@ -155,9 +157,12 @@ runtime configuration: OLED enabled state, raw-LoRa frequency and TX power,
 retry delays/count, confirmed-incident location interval, and GNSS freshness.
 The value is strictly validated, written to a redundant CRC-protected NVS
 journal, and applied after an automatic restart. Invalid or corrupt records use
-safe firmware defaults. Writes are rejected while SOS delivery or cancellation
-is active. See [the mobile integration contract](docs/mobile-configuration.md)
-for the Local Control property, exact 28-byte format and accepted ranges.
+safe firmware defaults. A read-only status property exposes supported firmware
+capabilities, SOS configuration lock, configuration source and pending/deferred
+apply state; a control property atomically restores firmware defaults. Writes
+are rejected while SOS delivery or cancellation is active. See [the mobile
+integration contract](docs/mobile-configuration.md) for the three versioned
+Local Control properties and accepted ranges.
 
 Board/RF-front-end selection, GPIO wiring, SOS button polarity, BLE onboarding
 credentials and the LoRa HMAC key cannot be changed through BLE. Before enabling
@@ -247,6 +252,7 @@ components/
   carelink_sos_store/ CRC-protected two-slot NVS journal
 main/              CareLink startup, diagnostic consumer and GPS screen layout
 docs/hardware.md   Manufacturer research and wiring decisions
+docs/prototype-wiring.md Prototype BOM, GPIO map and safe bring-up order
 docs/imu-design.md IMU architecture and integration details
 docs/sos-protocol.md CareLink/Rolork wire, security and ACK contract
 docs/mobile-configuration.md BLE security, property and runtime settings contract

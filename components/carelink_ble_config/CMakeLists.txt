@@ -5,7 +5,7 @@ if(CONFIG_CARELINK_BLE_CONFIG_ENABLED)
 endif()
 
 idf_component_register(
-    SRCS "carelink_ble_config.c"
+    SRCS "carelink_ble_config.c" "carelink_ble_protocol.c"
     INCLUDE_DIRS "include"
     REQUIRES carelink_config carelink_incident
     PRIV_REQUIRES ${carelink_ble_private_requires})

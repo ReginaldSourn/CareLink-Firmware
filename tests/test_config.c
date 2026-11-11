@@ -2,6 +2,7 @@
 #include <stdint.h>
 #include <string.h>
 
+#include "carelink_ble_protocol.h"
 #include "carelink_config_codec.h"
 
 static carelink_runtime_config_t valid_config(void)
@@ -124,11 +125,87 @@ static void test_record_integrity(void)
     assert(!carelink_config_generation_newer(7U, 7U));
 }
 
+static void test_ble_status_wire(void)
+{
+    const carelink_ble_status_t status = {
+        .config_wire_version = CARELINK_CONFIG_WIRE_VERSION,
+        .config_source = 2U,
+        .incident_state = 3U,
+        .capabilities = CARELINK_BLE_CAPABILITY_OLED |
+                        CARELINK_BLE_CAPABILITY_RAW_LORA |
+                        CARELINK_BLE_CAPABILITY_RESTORE_DEFAULTS,
+        .configuration_locked = true,
+        .restart_pending = false,
+        .apply_deferred = true,
+        .incident_running = true,
+    };
+    uint8_t wire[CARELINK_BLE_STATUS_WIRE_SIZE];
+    assert(carelink_ble_status_encode(&status, wire) ==
+           CARELINK_BLE_PROTOCOL_OK);
+    assert(wire[0] == CARELINK_BLE_STATUS_VERSION);
+    assert(wire[1] == (CARELINK_BLE_STATUS_FLAG_CONFIGURATION_LOCKED |
+                       CARELINK_BLE_STATUS_FLAG_APPLY_DEFERRED |
+                       CARELINK_BLE_STATUS_FLAG_INCIDENT_RUNNING));
+    assert(wire[2] == CARELINK_CONFIG_WIRE_VERSION);
+    assert(wire[3] == 2U);
+    assert(wire[4] == 3U);
+    assert(wire[5] == 0U && wire[6] == 0U && wire[7] == 0U);
+    assert(wire[8] == 0x13U);
+    assert(wire[9] == 0U && wire[10] == 0U && wire[11] == 0U);
+
+    carelink_ble_status_t invalid = status;
+    invalid.config_source = 3U;
+    assert(carelink_ble_status_encode(&invalid, wire) ==
+           CARELINK_BLE_PROTOCOL_INVALID_FIELD);
+    invalid = status;
+    invalid.incident_state = 8U;
+    assert(carelink_ble_status_encode(&invalid, wire) ==
+           CARELINK_BLE_PROTOCOL_INVALID_FIELD);
+    invalid = status;
+    invalid.capabilities = UINT32_C(1) << 31;
+    assert(carelink_ble_status_encode(&invalid, wire) ==
+           CARELINK_BLE_PROTOCOL_INVALID_FIELD);
+    assert(carelink_ble_status_encode(NULL, wire) ==
+           CARELINK_BLE_PROTOCOL_INVALID_ARGUMENT);
+}
+
+static void test_ble_control_wire(void)
+{
+    uint8_t wire[CARELINK_BLE_CONTROL_WIRE_SIZE];
+    carelink_ble_control_command_t command = CARELINK_BLE_CONTROL_NONE;
+    assert(carelink_ble_control_encode(CARELINK_BLE_CONTROL_RESTORE_DEFAULTS,
+                                       wire) == CARELINK_BLE_PROTOCOL_OK);
+    assert(wire[0] == CARELINK_BLE_CONTROL_VERSION && wire[1] == 1U &&
+           wire[2] == 0U && wire[3] == 0U);
+    assert(carelink_ble_control_decode(wire, sizeof(wire), &command) ==
+           CARELINK_BLE_PROTOCOL_OK);
+    assert(command == CARELINK_BLE_CONTROL_RESTORE_DEFAULTS);
+
+    assert(carelink_ble_control_decode(wire, sizeof(wire) - 1U, &command) ==
+           CARELINK_BLE_PROTOCOL_INVALID_SIZE);
+    wire[0] = 2U;
+    assert(carelink_ble_control_decode(wire, sizeof(wire), &command) ==
+           CARELINK_BLE_PROTOCOL_UNSUPPORTED_VERSION);
+    wire[0] = CARELINK_BLE_CONTROL_VERSION;
+    wire[1] = 2U;
+    assert(carelink_ble_control_decode(wire, sizeof(wire), &command) ==
+           CARELINK_BLE_PROTOCOL_INVALID_FIELD);
+    wire[1] = 1U;
+    wire[3] = 1U;
+    assert(carelink_ble_control_decode(wire, sizeof(wire), &command) ==
+           CARELINK_BLE_PROTOCOL_INVALID_FIELD);
+    assert(carelink_ble_control_encode((carelink_ble_control_command_t)2,
+                                       wire) ==
+           CARELINK_BLE_PROTOCOL_INVALID_FIELD);
+}
+
 int main(void)
 {
     test_wire_round_trip();
     test_validation();
     test_wire_rejection();
     test_record_integrity();
+    test_ble_status_wire();
+    test_ble_control_wire();
     return 0;
 }
