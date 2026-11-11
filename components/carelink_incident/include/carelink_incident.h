@@ -20,12 +20,21 @@ typedef esp_err_t (*carelink_incident_get_telemetry_fn)(
 typedef esp_err_t (*carelink_incident_next_counter_fn)(void *context,
                                                        uint64_t *counter);
 
+/* Runs in the incident owner task after an SOS state transition. The callback
+ * must not block. */
+typedef void (*carelink_incident_status_changed_fn)(
+    carelink_sos_state_t state,
+    bool cancellation_pending,
+    void *context);
+
 typedef struct {
     uint64_t device_id;
     uint32_t session_id;
     carelink_auth_key_provider_t key_provider;
     carelink_incident_get_telemetry_fn get_telemetry;
     carelink_incident_next_counter_fn next_replay_counter;
+    carelink_incident_status_changed_fn status_changed;
+    void *status_changed_context;
     carelink_radio_config_t radio;
     carelink_retry_config_t retry;
     uint32_t location_update_ms;

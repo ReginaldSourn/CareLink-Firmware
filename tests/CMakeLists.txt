@@ -65,6 +65,21 @@ if(CARELINK_SANITIZE)
 endif()
 add_test(NAME sos_button_logic COMMAND test_button)
 
+add_executable(test_buzzer test_buzzer.c
+    ../components/carelink_buzzer/carelink_buzzer_pattern.c)
+target_include_directories(test_buzzer PRIVATE
+    ../components/carelink_buzzer
+    ../components/carelink_sos/include)
+target_compile_features(test_buzzer PRIVATE c_std_11)
+target_compile_options(test_buzzer PRIVATE
+    -Wall -Wextra -Werror -Wpedantic -UNDEBUG)
+if(CARELINK_SANITIZE)
+    target_compile_options(test_buzzer PRIVATE
+        -fsanitize=address,undefined -fno-omit-frame-pointer)
+    target_link_options(test_buzzer PRIVATE -fsanitize=address,undefined)
+endif()
+add_test(NAME buzzer_patterns COMMAND test_buzzer)
+
 add_executable(test_protocol test_protocol.c
     ../components/carelink_protocol/carelink_protocol.c)
 target_include_directories(test_protocol PRIVATE

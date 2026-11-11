@@ -64,14 +64,21 @@ static void status_error(esp_err_t error)
 
 static void status_state(void)
 {
-    portENTER_CRITICAL(&s_status_lock);
-    s_status.state = s_sos.snapshot.state;
-    s_status.configuration_locked =
-        s_sos.snapshot.state == CARELINK_SOS_ARMING ||
-        (s_sos.snapshot.state >= CARELINK_SOS_ACTIVE_UNCONFIRMED &&
-         s_sos.snapshot.state <= CARELINK_SOS_CAREGIVER_ACKNOWLEDGED) ||
+    const carelink_sos_state_t state = s_sos.snapshot.state;
+    const bool cancellation_pending =
         s_sos.snapshot.cancel_delivery_pending;
+    portENTER_CRITICAL(&s_status_lock);
+    s_status.state = state;
+    s_status.configuration_locked =
+        state == CARELINK_SOS_ARMING ||
+        (state >= CARELINK_SOS_ACTIVE_UNCONFIRMED &&
+         state <= CARELINK_SOS_CAREGIVER_ACKNOWLEDGED) ||
+        cancellation_pending;
     portEXIT_CRITICAL(&s_status_lock);
+    if (s_config.status_changed != NULL) {
+        s_config.status_changed(state, cancellation_pending,
+                                s_config.status_changed_context);
+    }
 }
 
 static bool is_active_or_pending_cancel(void)
@@ -387,6 +394,12 @@ static void incident_task(void *argument)
             s_sos.snapshot.state == CARELINK_SOS_ARMING ||
             is_active_or_pending_cancel();
         portEXIT_CRITICAL(&s_status_lock);
+        if (s_config.status_changed != NULL) {
+            s_config.status_changed(
+                s_sos.snapshot.state,
+                s_sos.snapshot.cancel_delivery_pending,
+                s_config.status_changed_context);
+        }
     }
     xTaskNotify(s_start_waiter, (uint32_t)startup_error,
                 eSetValueWithOverwrite);

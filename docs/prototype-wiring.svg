@@ -25,7 +25,7 @@
 
   <rect width="1400" height="900" fill="#ffffff"/>
   <text x="50" y="55" class="title">CareLink Heltec V4 prototype wiring</text>
-  <text x="50" y="83" class="subtitle">Recommended dedicated IMU bus • onboard OLED and SX1262 • normally-open active-low SOS</text>
+  <text x="50" y="83" class="subtitle">Dedicated IMU bus • onboard OLED/SX1262 • active-low SOS • transistor-driven passive piezo</text>
 
   <rect x="430" y="120" width="500" height="650" rx="25" class="board"/>
   <text x="680" y="160" text-anchor="middle" class="box-title">Heltec WiFi LoRa 32 V4</text>
@@ -54,6 +54,12 @@
   <text x="445" y="589" class="label">GPIO4, J3-15</text>
   <circle cx="430" cy="655" r="7" class="port"/>
   <text x="445" y="649" class="label">GND, J3-1</text>
+  <circle cx="430" cy="420" r="7" class="port"/>
+  <text x="445" y="414" class="label">GPIO6, J3-17</text>
+  <circle cx="430" cy="465" r="7" class="port"/>
+  <text x="445" y="459" class="label">3V3, J3-2/3</text>
+  <circle cx="430" cy="505" r="7" class="port"/>
+  <text x="445" y="499" class="label">GND, J3-1</text>
 
   <rect x="1050" y="170" width="270" height="150" rx="18" class="module"/>
   <text x="1185" y="207" text-anchor="middle" class="box-title">Heltec L76K GNSS</text>
@@ -84,6 +90,17 @@
   <path d="M330 595 H423" class="data"/>
   <path d="M330 655 H423" class="ground"/>
 
+  <rect x="70" y="310" width="280" height="210" rx="18" class="module"/>
+  <text x="210" y="348" text-anchor="middle" class="box-title">Passive piezo buzzer</text>
+  <text x="210" y="380" text-anchor="middle" class="small">GPIO6 → 1 kΩ → NPN base</text>
+  <text x="210" y="405" text-anchor="middle" class="small">100 kΩ base-to-GND pull-down</text>
+  <text x="210" y="440" text-anchor="middle" class="small">3V3 → piezo +</text>
+  <text x="210" y="465" text-anchor="middle" class="small">piezo − → collector</text>
+  <text x="210" y="495" text-anchor="middle" class="small">Emitter → GND • 2.4 kHz PWM</text>
+  <path d="M350 420 H423" class="data"/>
+  <path d="M350 465 H423" class="power"/>
+  <path d="M350 505 H423" class="ground"/>
+
   <path d="M680 120 V98" class="rf" marker-end="url(#arrow-orange)"/>
   <path d="M650 98 Q680 64 710 98" fill="none" stroke="#d97706" stroke-width="5"/>
   <text x="745" y="103" class="label">Band-matched LoRa antenna</text>
@@ -92,7 +109,7 @@
   <text x="680" y="734" text-anchor="middle" class="label">USB-C: first power/flash</text>
 
   <line x1="70" y1="812" x2="125" y2="812" class="power"/>
-  <text x="140" y="818" class="label">3.3 V switched Vext</text>
+  <text x="140" y="818" class="label">3.3 V / switched Vext power</text>
   <line x1="350" y1="812" x2="405" y2="812" class="ground"/>
   <text x="420" y="818" class="label">Ground</text>
   <line x1="560" y1="812" x2="615" y2="812" class="data"/>

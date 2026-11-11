@@ -1,0 +1,40 @@
+menu "CareLink buzzer"
+    config CARELINK_BUZZER_ENABLED
+        bool "Enable SOS feedback buzzer"
+        depends on CARELINK_INCIDENT_ENABLED
+        default n
+        help
+            Drives a passive piezo through an external transistor using PWM.
+            Feedback patterns are non-blocking and follow authenticated SOS
+            delivery state. Keep disabled when no buzzer circuit is fitted.
+
+    if CARELINK_BUZZER_ENABLED
+        config CARELINK_BUZZER_GPIO
+            int "Buzzer transistor control GPIO"
+            range 1 48
+            default 6
+            help
+                GPIO6 is J3 pin 17 on V4 R2. Startup rejects conflicts with
+                GNSS, IMU, SOS button, radio, OLED, memory and power signals.
+
+        config CARELINK_BUZZER_FREQUENCY_HZ
+            int "Passive piezo frequency (Hz)"
+            range 1000 5000
+            default 2400
+
+        config CARELINK_BUZZER_DUTY_PERCENT
+            int "PWM duty percent"
+            range 10 50
+            default 50
+
+        config CARELINK_BUZZER_TASK_STACK_BYTES
+            int "Buzzer task stack (bytes)"
+            range 1536 4096
+            default 2048
+
+        config CARELINK_BUZZER_TASK_PRIORITY
+            int "Buzzer task priority"
+            range 1 10
+            default 5
+    endif
+endmenu

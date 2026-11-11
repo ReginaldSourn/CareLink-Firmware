@@ -3,7 +3,7 @@
 This wiring matches the GPIO validation and drivers in this repository. It is
 intended for a bench prototype using a Heltec WiFi LoRa 32 V4, the official
 Heltec L76K GNSS accessory, an LSM6DSO breakout, a dedicated SOS button, the
-onboard OLED, and the onboard SX1262 radio.
+onboard OLED, a passive-piezo buzzer circuit, and the onboard SX1262 radio.
 
 ![CareLink prototype wiring](prototype-wiring.svg)
 
@@ -28,6 +28,9 @@ ESP32 module marking.
 | 1 | Heltec L76K GNSS module and 8-pin cable | Use the keyed GNSS connector; do not force or reverse it |
 | 1 | LSM6DSO breakout | LSM6DSO letter O, 3.3 V I/O, I2C, with decoupling and pull-ups |
 | 1 | Normally-open momentary SOS button | Connects GPIO4 to ground when pressed |
+| 1 | 3.3 V passive piezo transducer | PWM-driven; do not substitute a fixed-tone active buzzer |
+| 1 | General-purpose NPN transistor | 2N2222, PN2222A or equivalent low-side driver |
+| 1 each | 1 kOhm and 100 kOhm resistors | Base resistor and base-to-ground pull-down |
 | 1 | USB-C data cable and regulated supply | Use USB for first bring-up; allow at least 1 A headroom |
 | 1 set | 2.54 mm headers/jumpers | Short I2C wiring and a common ground |
 | optional | Inline USB power meter | Bench current measurement; no GPIO connection |
@@ -53,6 +56,11 @@ module or connect to the onboard radio SPI pins.
                                                            address 0x6A
 
        GPIO4              -------- normally-open SOS button -------- GND
+
+       GPIO6 (J3 pin 17) ---- 1 kOhm ----> NPN base
+                                      +---- 100 kOhm ----> GND
+       GND ------------------------------> NPN emitter
+       3V3 ---- piezo (+)   piezo (-) --------> NPN collector
 
        LoRa IPEX          -------------------------->  band-matched antenna
        USB-C              -------------------------->  PC / regulated USB power
@@ -113,6 +121,30 @@ For a breadboard, keep the GPIO4 wire short. A production pendant should add a
 reviewed ESD/transient network and verify behavior with a stuck or damaged
 button; that protection is not represented by loose prototype wiring.
 
+### SOS buzzer
+
+Use a passive 3.3 V piezo transducer so firmware can generate the configured
+2.4 kHz tone. GPIO6 (J3 pin 17) drives a 2N2222/PN2222A-compatible NPN base
+through 1 kOhm. Add 100 kOhm from base to ground, connect emitter to ground,
+collector to piezo negative, and piezo positive to the board's 3V3 pin. The
+transistor prevents buzzer current from being sourced directly by the ESP32.
+
+This circuit is for a piezo transducer. If an electromagnetic sounder is used,
+its current and inductive flyback protection require a separate electrical
+review. Never connect a 5 V buzzer supply to GPIO6. Firmware rejects GPIO6 when
+it conflicts with GNSS, the IMU, or the SOS button.
+
+The non-blocking feedback patterns are:
+
+| SOS stage | Sound |
+| --- | --- |
+| Button arming | Short repeating chirp while held |
+| Contacting gateway | Repeating group of three tones |
+| Gateway/cloud receipt | Short confirmation pair |
+| Caregiver acknowledged | Two long confirmation tones |
+| Cancellation pending | Repeating cancellation pair |
+| Resolved/cancelled | Short completion tone or pair |
+
 ### OLED, LoRa and Rolork gateway
 
 The OLED is onboard and needs no jumpers. It uses SDA GPIO17, SCL GPIO18, reset
@@ -151,6 +183,7 @@ Set these values in `idf.py menuconfig`:
 | IMU | LSM6DSO enabled, address `0x6A`, shared I2C disabled |
 | IMU SDA / SCL / Vext | GPIO47 / GPIO48 / enabled |
 | SOS button | Enabled, GPIO4, active-low, pull-up |
+| SOS buzzer | Enabled, GPIO6, 2400 Hz, 50% duty |
 | Radio | Enabled with exact V4.2, V4.3.1, or R8 profile |
 | Incident service | Enable only after provisioning the device HMAC key |
 
@@ -162,13 +195,13 @@ to transmit.
 
 1. Leave the battery disconnected. Attach the LoRa antenna.
 2. With power off, check for a short between 3.3 V/Vext and GND.
-3. Connect the L76K cable, IMU jumpers, and SOS button.
-4. Recheck GPIO47/GPIO48 orientation, IMU CS/SA0, and common ground.
+3. Connect the L76K cable, IMU jumpers, SOS button, and buzzer transistor circuit.
+4. Recheck GPIO47/GPIO48 orientation, IMU CS/SA0, NPN pinout, and common ground.
 5. Power from USB with LoRa and the incident service disabled. Confirm GNSS,
    OLED, IMU identity, and button events in the serial log.
 6. Provision a unique LoRa HMAC key and configure the exact board/radio profile.
 7. Enable low-power LoRa testing with the Rolork gateway at short range. Confirm
-   authenticated receive and ACK before testing retries.
+   authenticated receive, ACK, and each buzzer transition before testing retries.
 8. Test SOS while GNSS has no fix, during LoRa loss, and across a power cycle.
 9. Only after the USB tests pass, verify battery polarity and repeat the tests
    from a protected one-cell battery.

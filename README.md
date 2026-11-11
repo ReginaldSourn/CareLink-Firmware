@@ -1,11 +1,12 @@
 # CareLink Firmware
 
 ESP-IDF firmware for a CareLink pendant prototype on the **Heltec WiFi LoRa 32
-V4 (ESP32-S3)**. It includes GNSS, optional OLED and LSM6DSO IMU diagnostics,
-battery voltage monitoring, a dedicated SOS-button service, authenticated raw
-LoRa transport, durable incident recovery and tiered gateway/cloud/caregiver
-acknowledgements. Safety-critical SOS features remain disabled by default until
-the PCB revision, SOS GPIO, regional radio settings and device key are confirmed.
+V4 (ESP32-S3)**. It includes GNSS, optional OLED, LSM6DSO IMU diagnostics and
+passive-piezo SOS feedback, battery voltage monitoring, a dedicated SOS-button
+service, authenticated raw LoRa transport, durable incident recovery and tiered
+gateway/cloud/caregiver acknowledgements. Safety-critical SOS features remain
+disabled by default until the PCB revision, GPIO allocation, regional radio
+settings and device key are confirmed.
 
 ## Hardware setup
 
@@ -24,6 +25,7 @@ For a complete breadboard BOM, GPIO allocation and connection sequence, use the
 | GNSS supply | Compatible socket supply, or the breakout's specified supply |
 | GNSS socket power enable | GPIO34 low on R2; GPIO42 low on R8 |
 | Battery voltage (R2 only) | ADC1 channel 0 / GPIO1; divider enable GPIO37 high |
+| Passive buzzer transistor control | GPIO6 / J3 pin 17, optional |
 
 For jumper wiring, use a breakout with compatible supply and UART logic levels.
 Check its schematic before powering it; a bare L76C and Heltec's L76K accessory
@@ -237,6 +239,7 @@ components/
   carelink_ble_config/ Secure Security-2 mobile configuration service
   carelink_board/   Heltec variant, pin validation, power and battery monitor
   carelink_button/  Debounced hold/stuck detection for a dedicated SOS input
+  carelink_buzzer/  Non-blocking passive-piezo PWM and SOS feedback patterns
   carelink_config/  Runtime settings codec and redundant CRC-protected NVS store
   carelink_incident/ Runtime owner for button, journal, radio, ACK and retry flow
   carelink_incident_policy/ Pure message, ACK and backoff rules
@@ -307,7 +310,8 @@ SOS tests cover button bounce/hold/stuck behavior, every incident-state/event
 pair, cancellation recovery, protocol mutation rejection, HMAC vectors and
 fail-closed key providers, journal corruption/generation wrap, replay-counter
 reservation, retry-time wrap, ACK matching, and all three radio profiles at
-100 Hz and 1 kHz RTOS tick rates. The enabled SOS configuration is also
+100 Hz and 1 kHz RTOS tick rates. Buzzer tests cover SOS pattern mapping,
+timings and GPIO conflicts. The enabled SOS configuration is also
 cross-compiled as a complete ESP32-S3 image. Runtime-configuration tests cover
 field bounds, exact little-endian encoding, reserved-byte rejection, CRC
 corruption and generation wrap. BLE-disabled and fully enabled BLE/SOS/radio

@@ -10,6 +10,7 @@
 #include "carelink.h"
 #include "carelink_board.h"
 #include "carelink_ble_config.h"
+#include "carelink_buzzer.h"
 #include "carelink_config.h"
 #include "carelink_gps.h"
 #include "carelink_imu.h"
@@ -103,6 +104,21 @@ static esp_err_t next_incident_counter(void *context, uint64_t *counter)
                : carelink_security_next_replay_counter(&app->security,
                                                        counter);
 }
+
+#if CONFIG_CARELINK_BUZZER_ENABLED
+static void incident_status_changed(carelink_sos_state_t state,
+                                    bool cancellation_pending,
+                                    void *context)
+{
+    (void)context;
+    const esp_err_t error =
+        carelink_buzzer_notify_sos(state, cancellation_pending);
+    if (error != ESP_OK) {
+        ESP_LOGW(TAG, "Buzzer state update failed: %s",
+                 esp_err_to_name(error));
+    }
+}
+#endif
 #endif
 
 void app_main(void)
@@ -156,6 +172,14 @@ void app_main(void)
 
     bool incident_ready = false;
 #if CONFIG_CARELINK_INCIDENT_ENABLED
+#if CONFIG_CARELINK_BUZZER_ENABLED
+    const esp_err_t buzzer_error = carelink_buzzer_start();
+    const bool buzzer_ready = buzzer_error == ESP_OK;
+    if (!buzzer_ready) {
+        ESP_LOGE(TAG, "SOS buzzer unavailable: %s; check GPIO and configuration",
+                 esp_err_to_name(buzzer_error));
+    }
+#endif
     incident_context.gps_ready = gps_ready;
     uint32_t initial_battery_mv = 0U;
     const bool initial_battery_available =
@@ -178,6 +202,9 @@ void app_main(void)
                 &incident_context.security),
             .get_telemetry = get_incident_telemetry,
             .next_replay_counter = next_incident_counter,
+#if CONFIG_CARELINK_BUZZER_ENABLED
+            .status_changed = buzzer_ready ? incident_status_changed : NULL,
+#endif
             .radio = {
                 .frequency_hz = runtime_config.radio_frequency_hz,
                 .tx_power_dbm = runtime_config.radio_tx_power_dbm,
