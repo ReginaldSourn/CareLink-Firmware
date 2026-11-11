@@ -1,0 +1,3 @@
+#pragma once
+
+#define CONFIG_CARELINK_REPLAY_COUNTER_WINDOW 4

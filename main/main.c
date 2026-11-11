@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <inttypes.h>
+#include <limits.h>
 
 #include "esp_log.h"
 #include "esp_timer.h"
@@ -11,13 +12,93 @@
 #include "carelink_gps.h"
 #include "carelink_imu.h"
 #include "carelink_display.h"
+#include "carelink_incident.h"
+#include "carelink_security.h"
+#include "nvs_flash.h"
+#include "sdkconfig.h"
 
 static const char *TAG = "carelink";
+
+#if CONFIG_CARELINK_INCIDENT_ENABLED
+typedef struct {
+    carelink_security_t security;
+    bool battery_ready;
+    bool gps_ready;
+} app_incident_context_t;
+
+static app_incident_context_t incident_context;
+
+static esp_err_t get_incident_telemetry(
+    void *context,
+    carelink_incident_telemetry_t *telemetry)
+{
+    app_incident_context_t *app = (app_incident_context_t *)context;
+    if (app == NULL || telemetry == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    *telemetry = (carelink_incident_telemetry_t){
+        .gnss = app->gps_ready ? CARELINK_GNSS_SEARCHING
+                               : CARELINK_GNSS_UNAVAILABLE,
+        .location_age_s = CARELINK_PROTOCOL_LOCATION_AGE_UNKNOWN,
+    };
+    if (app->battery_ready) {
+        uint32_t battery_mv = 0U;
+        if (carelink_board_battery_read_mv(&battery_mv) == ESP_OK) {
+            telemetry->battery_mv =
+                battery_mv > UINT16_MAX ? UINT16_MAX : (uint16_t)battery_mv;
+        }
+    }
+    if (!app->gps_ready) {
+        return ESP_OK;
+    }
+
+    carelink_gps_snapshot_t gps;
+    const esp_err_t error = carelink_gps_get_snapshot(&gps);
+    if (error != ESP_OK) {
+        return error;
+    }
+    if (gps.state != CARELINK_GPS_FIXED &&
+        gps.state != CARELINK_GPS_STALE) {
+        telemetry->gnss = CARELINK_GNSS_SEARCHING;
+        return ESP_OK;
+    }
+    telemetry->gnss = gps.state == CARELINK_GPS_FIXED
+                          ? CARELINK_GNSS_FRESH
+                          : CARELINK_GNSS_STALE;
+    telemetry->has_location = true;
+    telemetry->latitude_e7 = (int32_t)(gps.fix.latitude_deg * 10000000.0);
+    telemetry->longitude_e7 = (int32_t)(gps.fix.longitude_deg * 10000000.0);
+    int64_t age_ms = esp_timer_get_time() / 1000 - gps.fix_report_ms;
+    if (age_ms < 0) {
+        age_ms = 0;
+    }
+    const uint64_t age_s = (uint64_t)age_ms / 1000U;
+    telemetry->location_age_s =
+        age_s >= CARELINK_PROTOCOL_LOCATION_AGE_UNKNOWN
+            ? CARELINK_PROTOCOL_LOCATION_AGE_UNKNOWN - 1U
+            : (uint32_t)age_s;
+    return ESP_OK;
+}
+
+static esp_err_t next_incident_counter(void *context, uint64_t *counter)
+{
+    app_incident_context_t *app = (app_incident_context_t *)context;
+    return app == NULL
+               ? ESP_ERR_INVALID_ARG
+               : carelink_security_next_replay_counter(&app->security,
+                                                       counter);
+}
+#endif
 
 void app_main(void)
 {
     printf("%s firmware starting\n", CARELINK_DEVICE_NAME);
     ESP_LOGI(TAG, "%s starting on %s", CARELINK_DEVICE_NAME, carelink_board_name());
+    esp_err_t battery_err = carelink_board_battery_init();
+    bool battery_ready = battery_err == ESP_OK;
+    if (battery_err != ESP_OK && battery_err != ESP_ERR_NOT_SUPPORTED) {
+        ESP_LOGW(TAG, "Battery monitor unavailable: %s", esp_err_to_name(battery_err));
+    }
     carelink_display_start();
     esp_err_t err = carelink_gps_start();
     bool gps_ready = err == ESP_OK;
@@ -32,7 +113,49 @@ void app_main(void)
                  esp_err_to_name(err));
     }
 
+    bool incident_ready = false;
+#if CONFIG_CARELINK_INCIDENT_ENABLED
+    incident_context.battery_ready = battery_ready;
+    incident_context.gps_ready = gps_ready;
+    err = nvs_flash_init();
+    if (err == ESP_OK) {
+        err = carelink_security_init(&incident_context.security);
+    }
+    uint64_t device_id = 0U;
+    if (err == ESP_OK) {
+        err = carelink_security_device_id(&device_id);
+    }
+    if (err == ESP_OK) {
+        const carelink_incident_config_t incident_config = {
+            .device_id = device_id,
+            .session_id = carelink_security_new_session_id(),
+            .key_provider = carelink_security_key_provider(
+                &incident_context.security),
+            .get_telemetry = get_incident_telemetry,
+            .next_replay_counter = next_incident_counter,
+            .context = &incident_context,
+        };
+        err = carelink_incident_start(&incident_config);
+    }
+    if (err == ESP_OK) {
+        incident_ready = true;
+        ESP_LOGI(TAG, "authenticated SOS incident service ready");
+    } else {
+        ESP_LOGE(TAG, "SOS incident service unavailable: %s",
+                 esp_err_to_name(err));
+    }
+#endif
+
     while (true) {
+        if (battery_ready && !incident_ready) {
+            uint32_t battery_mv = 0;
+            battery_err = carelink_board_battery_read_mv(&battery_mv);
+            if (battery_err == ESP_OK) {
+                ESP_LOGI(TAG, "Battery: %.3f V", (double)battery_mv / 1000.0);
+            } else {
+                ESP_LOGW(TAG, "Battery read failed: %s", esp_err_to_name(battery_err));
+            }
+        }
         carelink_gps_snapshot_t gps;
         if (gps_ready && carelink_gps_get_snapshot(&gps) == ESP_OK) {
             carelink_display_gps(&gps);

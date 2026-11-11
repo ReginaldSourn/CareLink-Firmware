@@ -1,0 +1,61 @@
+menu "CareLink SOS button"
+    config CARELINK_BUTTON_ENABLED
+        bool "Enable dedicated SOS button"
+        default n
+        help
+            Keep disabled until the production PCB GPIO and electrical active
+            level are confirmed. GPIO0/PRG is never accepted as an SOS input.
+
+    if CARELINK_BUTTON_ENABLED
+        config CARELINK_BUTTON_GPIO
+            int "Dedicated SOS button GPIO"
+            range 1 48
+            default 4
+            help
+                Only free Heltec V4 header GPIOs are accepted. Radio, FEM,
+                OLED, GNSS, USB, strapping, memory and power pins are rejected.
+
+        choice CARELINK_BUTTON_ACTIVE_LEVEL
+            prompt "Button active level"
+            default CARELINK_BUTTON_ACTIVE_LOW
+            config CARELINK_BUTTON_ACTIVE_LOW
+                bool "Active low"
+            config CARELINK_BUTTON_ACTIVE_HIGH
+                bool "Active high"
+        endchoice
+
+        choice CARELINK_BUTTON_PULL
+            prompt "Internal pull resistor"
+            default CARELINK_BUTTON_PULL_UP
+            config CARELINK_BUTTON_PULL_UP
+                bool "Pull up"
+            config CARELINK_BUTTON_PULL_DOWN
+                bool "Pull down"
+            config CARELINK_BUTTON_PULL_NONE
+                bool "No internal pull"
+        endchoice
+
+        config CARELINK_BUTTON_DEBOUNCE_MS
+            int "Debounce interval (milliseconds)"
+            range 10 200
+            default 40
+
+        config CARELINK_BUTTON_HOLD_MS
+            int "SOS hold threshold (milliseconds)"
+            range 500 10000
+            default 1500
+
+        config CARELINK_BUTTON_STUCK_MS
+            int "Stuck-button threshold (milliseconds)"
+            range 2000 3600000
+            default 60000
+            help
+                Must be greater than the SOS hold threshold. Startup fails if
+                an invalid custom configuration violates this relationship.
+
+        config CARELINK_BUTTON_TASK_STACK_BYTES
+            int "Button task stack (bytes)"
+            range 2048 8192
+            default 3072
+    endif
+endmenu

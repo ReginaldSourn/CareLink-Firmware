@@ -1,0 +1,69 @@
+menu "CareLink radio"
+    config CARELINK_RADIO_ENABLED
+        bool "Enable the CareLink SX1262 radio"
+        default n
+        help
+            Enable raw LoRa transmission through the on-board SX1262. The
+            application must still call carelink_radio_init() from the task
+            that will own all subsequent radio operations.
+
+    choice CARELINK_RADIO_BOARD_PROFILE
+        prompt "Heltec radio board profile"
+        depends on CARELINK_RADIO_ENABLED
+        default CARELINK_RADIO_BOARD_HELTEC_V42_R2
+        help
+            The PCB revision selects the external RF front-end GPIO and
+            polarity. Selecting the wrong profile can prevent reception or
+            drive the front end in the wrong direction during transmission.
+
+        config CARELINK_RADIO_BOARD_HELTEC_V42_R2
+            bool "Heltec V4.2 S3R2 / GC1109"
+
+        config CARELINK_RADIO_BOARD_HELTEC_V431_R2
+            bool "Heltec V4.3.1 S3R2 / KCT8103L"
+
+        config CARELINK_RADIO_BOARD_HELTEC_V4_R8
+            bool "Heltec V4-R8 / KCT8103L"
+    endchoice
+
+    config CARELINK_RADIO_FREQUENCY_HZ
+        int "Raw LoRa carrier frequency (Hz)"
+        depends on CARELINK_RADIO_ENABLED
+        range 150000000 960000000
+        default 915000000
+        help
+            Must exactly match the Rolork gateway. The 915 MHz default is a
+            compatibility value, not permission to transmit. Set a legal
+            frequency, power, and duty cycle for the deployment country.
+
+    config CARELINK_RADIO_TX_POWER_DBM
+        int "SX1262 conducted TX power (dBm)"
+        depends on CARELINK_RADIO_ENABLED
+        range -9 14
+        default 0
+        help
+            Low initial SX1262 drive setting before the Heltec external RF
+            front end. Do not increase it until final radiated power, front-end
+            input limits, thermal behavior, and regional limits are verified.
+
+    config CARELINK_RADIO_BUSY_TIMEOUT_MS
+        int "Maximum BUSY wait (ms)"
+        depends on CARELINK_RADIO_ENABLED
+        range 10 5000
+        default 1000
+
+    config CARELINK_RADIO_TX_TIMEOUT_MS
+        int "Maximum packet transmission time (ms)"
+        depends on CARELINK_RADIO_ENABLED
+        range 100 30000
+        default 5000
+
+    config CARELINK_RADIO_RX_MAX_WAIT_MS
+        int "Maximum receive poll wait (ms)"
+        depends on CARELINK_RADIO_ENABLED
+        range 1 30000
+        default 1000
+        help
+            Upper bound accepted by carelink_radio_receive(). A zero timeout
+            remains available for nonblocking polling.
+endmenu

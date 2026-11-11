@@ -17,6 +17,14 @@ and Vext moves from GPIO36 to GPIO40. Board selection is explicit so the driver
 does not apply R2 reset/wake settings to R8. See
 [Heltec's R8 changes](https://wiki.heltec.org/docs/devices/open-source-hardware/esp32-series/lora-32/wifi-lora-32-v4_r8_board/).
 
+The R2 V4.3 schematic connects VBAT to GPIO1/ADC1 channel 0 through a switched
+390 kΩ/100 kΩ divider. GPIO37 (`ADC_Ctrl`) drives an NPN that pulls down the
+gate of the P-channel high-side switch, so GPIO37 high enables measurement and
+low disables the divider. Firmware uses calibrated ADC readings and a 4.9
+divider multiplier. This measures terminal voltage only; there is no fuel-gauge
+or coulomb-counter IC. The R8 pin map removes `ADC_Ctrl`, so this exact path is
+compiled only for the R2 board selection.
+
 ## Signal direction and power
 
 The [V4.2 datasheet](https://s.heltec.cn/download/WiFi_LoRa_32_V4/datasheet/WiFi_LoRa_32_V4.2.0.pdf)

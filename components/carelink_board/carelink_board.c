@@ -4,6 +4,15 @@
 #include "driver/gpio.h"
 #include "sdkconfig.h"
 
+#if CONFIG_CARELINK_BOARD_HELTEC_V4_R2
+#include "esp_adc/adc_cali.h"
+#include "esp_adc/adc_cali_scheme.h"
+#include "esp_adc/adc_oneshot.h"
+#include "esp_rom_sys.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+#endif
+
 #if !CONFIG_IDF_TARGET_ESP32S3
 #error "Heltec WiFi LoRa 32 V4 requires idf.py set-target esp32s3"
 #endif
@@ -16,6 +25,18 @@
 #define GNSS_POWER_GPIO 34
 #define VEXT_POWER_GPIO 36
 #define BOARD_NAME "Heltec WiFi LoRa 32 V4 R2"
+#define VBAT_ADC_CTRL_GPIO 37
+#define VBAT_ADC_UNIT ADC_UNIT_1
+#define VBAT_ADC_CHANNEL ADC_CHANNEL_0
+#define VBAT_ADC_ATTEN ADC_ATTEN_DB_2_5
+#define VBAT_SAMPLE_COUNT 16
+#define VBAT_DIVIDER_NUMERATOR 490
+#define VBAT_DIVIDER_DENOMINATOR 100
+#endif
+
+#if CONFIG_CARELINK_BOARD_HELTEC_V4_R2
+static adc_oneshot_unit_handle_t vbat_adc;
+static adc_cali_handle_t vbat_calibration;
 #endif
 
 const char *carelink_board_name(void) { return BOARD_NAME; }
@@ -51,6 +72,90 @@ esp_err_t carelink_board_gnss_power(bool enabled)
 #else
     (void)enabled;
     return ESP_OK;
+#endif
+}
+
+esp_err_t carelink_board_battery_init(void)
+{
+#if CONFIG_CARELINK_BOARD_HELTEC_V4_R2
+    if (vbat_adc) return ESP_ERR_INVALID_STATE;
+
+    /* Keep the P-channel switch off except while sampling. GPIO37 drives Q6,
+     * so HIGH enables Q5 and connects VBAT to the 390K/100K divider. */
+    esp_err_t err = gpio_set_level(VBAT_ADC_CTRL_GPIO, 0);
+    if (err != ESP_OK) return err;
+    err = gpio_set_direction(VBAT_ADC_CTRL_GPIO, GPIO_MODE_OUTPUT);
+    if (err != ESP_OK) return err;
+
+    const adc_oneshot_unit_init_cfg_t unit_config = {
+        .unit_id = VBAT_ADC_UNIT,
+        .ulp_mode = ADC_ULP_MODE_DISABLE,
+    };
+    err = adc_oneshot_new_unit(&unit_config, &vbat_adc);
+    if (err != ESP_OK) return err;
+
+    const adc_oneshot_chan_cfg_t channel_config = {
+        .atten = VBAT_ADC_ATTEN,
+        .bitwidth = ADC_BITWIDTH_DEFAULT,
+    };
+    err = adc_oneshot_config_channel(vbat_adc, VBAT_ADC_CHANNEL, &channel_config);
+    if (err != ESP_OK) goto fail;
+
+    const adc_cali_curve_fitting_config_t calibration_config = {
+        .unit_id = VBAT_ADC_UNIT,
+        .chan = VBAT_ADC_CHANNEL,
+        .atten = VBAT_ADC_ATTEN,
+        .bitwidth = ADC_BITWIDTH_DEFAULT,
+    };
+    err = adc_cali_create_scheme_curve_fitting(&calibration_config, &vbat_calibration);
+    if (err != ESP_OK) goto fail;
+    return ESP_OK;
+
+fail:
+    adc_oneshot_del_unit(vbat_adc);
+    vbat_adc = NULL;
+    return err;
+#else
+    return ESP_ERR_NOT_SUPPORTED;
+#endif
+}
+
+esp_err_t carelink_board_battery_read_mv(uint32_t *battery_mv)
+{
+    if (!battery_mv) return ESP_ERR_INVALID_ARG;
+#if CONFIG_CARELINK_BOARD_HELTEC_V4_R2
+    if (!vbat_adc || !vbat_calibration) return ESP_ERR_INVALID_STATE;
+
+    esp_err_t err = gpio_set_level(VBAT_ADC_CTRL_GPIO, 1);
+    if (err != ESP_OK) return err;
+    vTaskDelay(pdMS_TO_TICKS(10));
+
+    uint32_t raw_sum = 0;
+    for (unsigned int i = 0; i < VBAT_SAMPLE_COUNT; ++i) {
+        int raw = 0;
+        err = adc_oneshot_read(vbat_adc, VBAT_ADC_CHANNEL, &raw);
+        if (err != ESP_OK) goto disable_divider;
+        raw_sum += (uint32_t)raw;
+        esp_rom_delay_us(200);
+    }
+
+    int adc_mv = 0;
+    err = adc_cali_raw_to_voltage(vbat_calibration,
+                                  (int)(raw_sum / VBAT_SAMPLE_COUNT), &adc_mv);
+    if (err == ESP_OK) {
+        /* ADC_IN = VBAT * 100K / (390K + 100K), hence VBAT = ADC_IN * 4.9. */
+        *battery_mv = ((uint32_t)adc_mv * VBAT_DIVIDER_NUMERATOR
+                       + VBAT_DIVIDER_DENOMINATOR / 2)
+                    / VBAT_DIVIDER_DENOMINATOR;
+    }
+
+disable_divider:
+    {
+        esp_err_t disable_err = gpio_set_level(VBAT_ADC_CTRL_GPIO, 0);
+        return err == ESP_OK ? disable_err : err;
+    }
+#else
+    return ESP_ERR_NOT_SUPPORTED;
 #endif
 }
 

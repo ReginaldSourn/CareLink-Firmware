@@ -1,0 +1,49 @@
+menu "CareLink incident service"
+    config CARELINK_INCIDENT_ENABLED
+        bool "Enable authenticated SOS incident service"
+        depends on CARELINK_BUTTON_ENABLED && CARELINK_RADIO_ENABLED
+        default n
+        help
+            Runs the button, durable SOS state machine, authenticated protocol,
+            raw-LoRa TX/RX, and ACK/retry loop. A unique manufacturing-provisioned
+            HMAC key is still required; startup fails closed without it.
+
+    if CARELINK_INCIDENT_ENABLED
+        config CARELINK_INCIDENT_RETRY_FIRST_MS
+            int "First radio retry delay (ms)"
+            range 500 60000
+            default 2000
+
+        config CARELINK_INCIDENT_RETRY_MAX_MS
+            int "Maximum radio retry delay (ms)"
+            range 1000 3600000
+            default 60000
+
+        config CARELINK_INCIDENT_MAX_ATTEMPTS
+            int "Maximum transmissions per packet"
+            range 1 100
+            default 12
+            help
+                Includes the initial transmission. Regional airtime and duty-cycle
+                requirements must be considered before increasing this value.
+
+        config CARELINK_INCIDENT_LOCATION_UPDATE_MS
+            int "Confirmed-incident location update interval (ms)"
+            range 10000 3600000
+            default 60000
+            help
+                Location updates begin only after the gateway radio-ACKs the
+                incident start. This prevents an unacknowledged start from being
+                superseded by a newer sequence.
+
+        config CARELINK_INCIDENT_TASK_STACK_BYTES
+            int "Incident task stack (bytes)"
+            range 4096 16384
+            default 8192
+
+        config CARELINK_INCIDENT_TASK_PRIORITY
+            int "Incident task priority"
+            range 2 20
+            default 8
+    endif
+endmenu

@@ -1,0 +1,9 @@
+menu "CareLink security storage"
+    config CARELINK_REPLAY_COUNTER_WINDOW
+        int "Reserved replay-counter window"
+        range 8 1024
+        default 32
+        help
+            A new high-water mark is committed to NVS once per window. A
+            reboot may skip unused values but can never reuse a reserved value.
+endmenu

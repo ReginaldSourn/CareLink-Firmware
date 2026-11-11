@@ -1,10 +1,11 @@
 # CareLink Firmware
 
-ESP-IDF firmware for testing a Quectel L76C GNSS receiver with a **Heltec WiFi
-LoRa 32 V4 (ESP32-S3)**. This milestone receives GPS data and reports position
-and receiver health over USB and the onboard OLED. Optional LSM6DSO IMU support
-reports acceleration, angular velocity and sensor health over USB. LoRa
-transport, SOS detection and low power scheduling are future application work.
+ESP-IDF firmware for a CareLink pendant prototype on the **Heltec WiFi LoRa 32
+V4 (ESP32-S3)**. It includes GNSS, optional OLED and LSM6DSO IMU diagnostics,
+battery voltage monitoring, a dedicated SOS-button service, authenticated raw
+LoRa transport, durable incident recovery and tiered gateway/cloud/caregiver
+acknowledgements. Safety-critical SOS features remain disabled by default until
+the PCB revision, SOS GPIO, regional radio settings and device key are confirmed.
 
 ## Hardware setup
 
@@ -20,6 +21,7 @@ See [hardware research and sources](docs/hardware.md).
 | GNSS ground | Heltec GND |
 | GNSS supply | Compatible socket supply, or the breakout's specified supply |
 | GNSS socket power enable | GPIO34 low on R2; GPIO42 low on R8 |
+| Battery voltage (R2 only) | ADC1 channel 0 / GPIO1; divider enable GPIO37 high |
 
 For jumper wiring, use a breakout with compatible supply and UART logic levels.
 Check its schematic before powering it; a bare L76C and Heltec's L76K accessory
@@ -92,6 +94,14 @@ altitude or speed, and fix age. GGA reports can show satellite count and HDOP;
 RMC reports do not carry those fields. The receiver-health counters appear
 while waiting for a fix. Expired/invalid coordinates are removed from the screen.
 
+The R2 firmware also reports battery-terminal voltage over USB once per second.
+It drives GPIO37 high only while sampling GPIO1, waits for the switched
+390 kΩ/100 kΩ divider to settle, averages calibrated ADC readings, then drives
+GPIO37 low again to avoid continuous divider current. This is a voltage reading,
+not a coulomb-counted state of charge; voltage-to-percentage estimates vary with
+cell chemistry, load, temperature and charging state. The R8 board uses a
+different VBAT circuit and this R2 measurement path returns `ESP_ERR_NOT_SUPPORTED`.
+
 An absent OLED logs a warning and GPS continues over USB. If a frame transfer
 fails, the driver resets the panel to prevent a frozen position remaining
 visible and stops updates until reboot. It retains its device resources to
@@ -99,6 +109,38 @@ avoid removing a device during an IMU transfer on the shared bus. Vext stays
 enabled because it also powers external headers. Check the board variant
 and display connector if the screen is blank. `carelink_i2c` owns I2C0 for
 firmware lifetime so the OLED and an optional IMU can share the bus safely.
+
+## Authenticated SOS and Rolork gateway
+
+The incident service is an opt-in vertical slice from a debounced long-press to
+an authenticated 74-byte LoRa frame. It persists every state transition in a
+CRC-protected two-slot NVS journal before transmission, sends without waiting
+for GNSS, retries with bounded exponential backoff, receives binary ACK frames,
+verifies HMAC-SHA-256 before decoding them, and distinguishes radio receipt from
+cloud acceptance and caregiver acknowledgement. A second long-press while an
+incident is active sends a durable cancellation; the record cannot be cleared
+until that cancellation receives a radio ACK.
+
+Enable these together in `menuconfig` only after validating the hardware:
+
+1. **CareLink SOS button**: select the real dedicated GPIO, active level, pull,
+   debounce and hold time. GPIO0/PRG and onboard peripheral pins are rejected.
+2. **CareLink radio**: select the exact Heltec V4.2/GC1109, V4.3.1/KCT8103L or
+   R8/KCT8103L RF-front-end profile. Confirm a legal deployment frequency,
+   power and duty cycle; the 915 MHz compatibility default is not authorization.
+3. **CareLink incident service**: set retry limits suitable for the deployment.
+
+Manufacturing must write one unique 32-byte random blob named `hmac_key` in the
+`carelink_sec` NVS namespace and provision the same key to the trusted Rolork
+gateway/backend association. Firmware never creates or falls back to a default
+key; the SOS service fails closed if the key is absent or malformed. Production
+units should use encrypted NVS/flash encryption and secure boot. Do not place
+real device keys in source control or `sdkconfig`.
+
+The current Rolork gateway receiver can ingest the binary frame in its existing
+base64 MQTT envelope, but its repository still needs authenticated frame
+verification, SX1262 downlink and ACK generation before the pendant can advance
+beyond `ACTIVE_UNCONFIRMED`. See [the wire and ACK contract](docs/sos-protocol.md).
 
 ## LSM6DSO IMU
 
@@ -163,15 +205,25 @@ IMU or connected serial device was available for validation here.
 
 ```text
 components/
-  carelink_board/   Heltec variant, pin validation, GNSS supply control
+  carelink_auth/    HMAC-SHA-256 frame signing and verification
+  carelink_board/   Heltec variant, pin validation, power and battery monitor
+  carelink_button/  Debounced hold/stuck detection for a dedicated SOS input
+  carelink_incident/ Runtime owner for button, journal, radio, ACK and retry flow
+  carelink_incident_policy/ Pure message, ACK and backoff rules
   carelink_nmea/    Allocation-free streaming parser; independent of ESP-IDF
   carelink_gps/     UART task, health counters, synchronized snapshot API
   carelink_i2c/     Shared I2C0 ownership for OLED and optional IMU
   carelink_imu/     LSM6DSO sampling, SI units, health and recovery
   carelink_oled/    OLED initialization, bounded I2C transfers, 1 KB text framebuffer
+  carelink_protocol/ Fixed-size, network-order CareLink LoRa v1 codec
+  carelink_radio/   Single-owner SX1262 raw-LoRa TX/RX driver
+  carelink_security/ Device identity, provisioned key and replay-counter window
+  carelink_sos/     Durable incident and acknowledgement state machine
+  carelink_sos_store/ CRC-protected two-slot NVS journal
 main/              CareLink startup, diagnostic consumer and GPS screen layout
 docs/hardware.md   Manufacturer research and wiring decisions
 docs/imu-design.md IMU architecture and integration details
+docs/sos-protocol.md CareLink/Rolork wire, security and ACK contract
 tests/             Native C parser, IMU, transport lifecycle and display tests
 sdkconfig.defaults ESP32-S3, flash and USB defaults
 ```
@@ -218,4 +270,10 @@ timeout, each startup transfer failure, readiness, signed conversion, scales,
 partial-read failures and retries. State tests check freshness boundaries and
 fault precedence; port tests check Vext handling, pin-validation failure,
 bounded transfers, cleanup and shared-bus retention.
+SOS tests cover button bounce/hold/stuck behavior, every incident-state/event
+pair, cancellation recovery, protocol mutation rejection, HMAC vectors and
+fail-closed key providers, journal corruption/generation wrap, replay-counter
+reservation, retry-time wrap, ACK matching, and all three radio profiles at
+100 Hz and 1 kHz RTOS tick rates. The enabled SOS configuration is also
+cross-compiled as a complete ESP32-S3 image.
 Build/tests do not verify electrical compatibility or live satellite fixes.
