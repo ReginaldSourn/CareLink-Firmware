@@ -74,6 +74,29 @@ static void test_manual_sos_without_gnss(void)
     }
 }
 
+static void test_call_request_trigger_is_preserved(void)
+{
+    carelink_sos_snapshot_t snapshot = active_snapshot();
+    snapshot.trigger = CARELINK_SOS_TRIGGER_CALL_REQUEST;
+    const carelink_incident_telemetry_t telemetry = no_fix_telemetry();
+    carelink_protocol_message_t message = {0};
+    assert(carelink_incident_build_message(&snapshot, &telemetry, &message) ==
+           CARELINK_INCIDENT_POLICY_OK);
+    assert(message.type == CARELINK_MESSAGE_SOS_START);
+    assert(message.trigger == CARELINK_TRIGGER_CALL_REQUEST);
+
+    carelink_protocol_message_t ack = radio_ack(&snapshot, &telemetry);
+    ack.trigger = CARELINK_TRIGGER_CALL_REQUEST;
+    carelink_sos_event_t event = {0};
+    assert(carelink_incident_match_ack(
+               &snapshot, telemetry.device_id, telemetry.session_id, &ack,
+               true, &event) == CARELINK_INCIDENT_POLICY_OK);
+    ack.trigger = CARELINK_TRIGGER_MANUAL;
+    assert(carelink_incident_match_ack(
+               &snapshot, telemetry.device_id, telemetry.session_id, &ack,
+               true, &event) == CARELINK_INCIDENT_POLICY_ACK_MISMATCH);
+}
+
 static void test_location_update_cancel_and_bad_telemetry(void)
 {
     carelink_sos_snapshot_t snapshot = active_snapshot();
@@ -204,6 +227,7 @@ static void test_retry_backoff_and_wrap(void)
 int main(void)
 {
     test_manual_sos_without_gnss();
+    test_call_request_trigger_is_preserved();
     test_location_update_cancel_and_bad_telemetry();
     test_authenticated_ack_matching();
     test_retry_backoff_and_wrap();

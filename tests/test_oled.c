@@ -45,6 +45,17 @@ static void test_user_status_format(void)
     assert_line(lines, 5U, "BATTERY N/A");
     assert_line(lines, 7U, "DO NOT POWER OFF");
 
+    const carelink_display_view_t call_request = {
+        .sos = CARELINK_DISPLAY_CALL_SENDING,
+        .gps = CARELINK_DISPLAY_GPS_READY,
+        .battery_available = true,
+        .battery_mv = 4021U,
+    };
+    carelink_display_format(&call_request, lines);
+    assert_line(lines, 1U, "CALL REQUEST");
+    assert_line(lines, 2U, "CONTACTING GATEWAY");
+    assert_line(lines, 7U, "DO NOT POWER OFF");
+
     const carelink_display_view_t cancelling = {
         .sos = CARELINK_DISPLAY_SOS_CANCELLING,
         .gps = CARELINK_DISPLAY_GPS_STALE,

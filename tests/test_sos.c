@@ -49,6 +49,19 @@ static void test_manual_sos_does_not_require_location(void)
     assert(carelink_sos_snapshot(&sos)->sequence == 1U);
 }
 
+static void test_call_request_uses_incident_lifecycle(void)
+{
+    carelink_sos_t sos;
+    carelink_sos_init(&sos);
+    carelink_sos_event_t value = event(CARELINK_SOS_EVENT_TRIGGER);
+    value.trigger = CARELINK_SOS_TRIGGER_CALL_REQUEST;
+    const carelink_sos_action_t action = carelink_sos_apply(&sos, &value);
+    assert(action.result == CARELINK_SOS_APPLIED);
+    assert(action.transmit);
+    assert(carelink_sos_snapshot(&sos)->trigger ==
+           CARELINK_SOS_TRIGGER_CALL_REQUEST);
+}
+
 static void test_delivery_progression_and_idempotence(void)
 {
     carelink_sos_t sos;
@@ -355,6 +368,7 @@ static void test_api_and_names(void)
 int main(void)
 {
     test_manual_sos_does_not_require_location();
+    test_call_request_uses_incident_lifecycle();
     test_delivery_progression_and_idempotence();
     test_retry_update_and_cancel_sequences();
     test_wrong_incident_and_ack_sequence_rejected();

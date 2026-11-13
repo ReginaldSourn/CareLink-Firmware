@@ -25,6 +25,7 @@ For a complete breadboard BOM, GPIO allocation and connection sequence, use the
 | GNSS supply | Compatible socket supply, or the breakout's specified supply |
 | GNSS socket power enable | GPIO34 low on R2; GPIO42 low on R8 |
 | Battery voltage (R2 only) | ADC1 channel 0 / GPIO1; divider enable GPIO37 high |
+| SOS button | GPIO4 / J3 pin 15, active-low with internal pull-up |
 | Passive buzzer transistor control | GPIO6 / J3 pin 17, optional |
 
 For jumper wiring, use a breakout with compatible supply and UART logic levels.
@@ -56,12 +57,14 @@ idf.py -B build/heltec-v4 -p /dev/ttyACM0 flash monitor
 ```
 
 Check **Component config → CareLink board** and **CareLink GPS** in menuconfig.
-Defaults select R2, GPIO39, 9600 baud, a 5-second freshness limit, 16 MB flash
-and native USB Serial/JTAG console. Existing `sdkconfig` values take precedence
-over defaults; verify them when reusing an older configuration. Replace the
-port name for your system. Hold **PRG**, press/release **RST**, then release
-**PRG** if the board does not enter download mode; press RST after flashing if
-needed. Exit the monitor with `Ctrl+]`.
+Prototype defaults select R2, GNSS GPIO39 at 9600 baud, SOS button GPIO4,
+passive-buzzer control GPIO6, and LSM6DSO I2C on SDA47/SCL48. They also select a
+5-second GNSS freshness limit, 16 MB flash and native USB Serial/JTAG console.
+Existing `sdkconfig` values take precedence over defaults; verify them when
+reusing an older configuration. Replace the port name for your system. Hold
+**PRG**, press/release **RST**, then release **PRG** if the board does not enter
+download mode; press RST after flashing if needed. Exit the monitor with
+`Ctrl+]`.
 
 ## Bench test
 
@@ -78,6 +81,12 @@ needed. Exit the monitor with `Ctrl+]`.
    the configured freshness interval plus the one-second display/logging interval.
 5. Reconnect TX and confirm recovery. An explicit RMC `V` or GGA quality `0`
    also invalidates a fix immediately when parsed.
+
+Button diagnostics report every debounced GPIO4 press, release, double press,
+hold and stuck condition. Every PWM tone reports a `BEEP` line with its event,
+position in the pattern, duration, GPIO and frequency. IMU values and health
+are reported once per second; transfer and stale-data recovery is logged at the
+point of failure.
 
 Optional **CareLink GPS → Log received NMEA sentences** helps diagnose module
 behavior. Raw logs and normal position logs contain location. Cold acquisition
@@ -116,9 +125,15 @@ firmware lifetime so the OLED and an optional IMU can share the bus safely.
 
 ## Authenticated SOS and Rolork gateway
 
-The incident service is an opt-in vertical slice from a debounced long-press to
-an authenticated 74-byte LoRa frame. It persists every state transition in a
-CRC-protected two-slot NVS journal before transmission, sends without waiting
+The incident service is an opt-in vertical slice from a debounced button gesture
+to an authenticated 74-byte LoRa frame. A press gives one beep, a 1.5-second
+hold sends a manual SOS with a repeating three-beep alert, and a quick double
+press sends a caregiver call request with two beeps. The call request is a
+backend contact request, not a cellular voice call. When enabled, the buzzer
+also gives one 500 ms power-on self-test beep after successful initialization.
+The service persists every
+state transition in a CRC-protected two-slot NVS journal before transmission,
+sends without waiting
 for GNSS, retries with bounded exponential backoff, receives binary ACK frames,
 verifies HMAC-SHA-256 before decoding them, and distinguishes radio receipt from
 cloud acceptance and caregiver acknowledgement. A second long-press while an
@@ -128,7 +143,8 @@ until that cancellation receives a radio ACK.
 Enable these together in `menuconfig` only after validating the hardware:
 
 1. **CareLink SOS button**: select the real dedicated GPIO, active level, pull,
-   debounce and hold time. GPIO0/PRG and onboard peripheral pins are rejected.
+   debounce, double-press window and hold time. GPIO0/PRG and onboard peripheral
+   pins are rejected.
 2. **CareLink radio**: select the exact Heltec V4.2/GC1109, V4.3.1/KCT8103L or
    R8/KCT8103L RF-front-end profile. Confirm a legal deployment frequency,
    power and duty cycle; the 915 MHz compatibility default is not authorization.
@@ -175,9 +191,10 @@ secure boot; the BLE session protects settings in transit, not plaintext flash.
 ## LSM6DSO IMU
 
 Support targets **LSM6DSO (letter O)**, not LSM6DS0 (zero). It checks the
-device identity before configuring it. IMU support is **disabled by default**
-until SDA/SCL wiring is selected; no header pin assignment is assumed.
-Vext power is the default when enabled, matching the planned hardware.
+device identity before configuring it. The prototype defaults enable it on
+dedicated I2C1 using SDA GPIO47 and SCL GPIO48. Change or disable these defaults
+before using different wiring. Vext power is enabled, matching the planned
+prototype hardware.
 
 In `idf.py menuconfig`:
 
@@ -306,8 +323,9 @@ timeout, each startup transfer failure, readiness, signed conversion, scales,
 partial-read failures and retries. State tests check freshness boundaries and
 fault precedence; port tests check Vext handling, pin-validation failure,
 bounded transfers, cleanup and shared-bus retention.
-SOS tests cover button bounce/hold/stuck behavior, every incident-state/event
-pair, cancellation recovery, protocol mutation rejection, HMAC vectors and
+SOS tests cover button bounce/double-press/hold/stuck behavior, every
+incident-state/event pair, cancellation recovery, protocol mutation rejection,
+HMAC vectors and
 fail-closed key providers, journal corruption/generation wrap, replay-counter
 reservation, retry-time wrap, ACK matching, and all three radio profiles at
 100 Hz and 1 kHz RTOS tick rates. Buzzer tests cover SOS pattern mapping,

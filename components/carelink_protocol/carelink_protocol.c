@@ -85,7 +85,7 @@ static bool valid_type(carelink_message_type_t type)
 static bool valid_trigger(carelink_trigger_t trigger)
 {
     return trigger >= CARELINK_TRIGGER_NONE &&
-           trigger <= CARELINK_TRIGGER_REMOTE_TEST;
+           trigger <= CARELINK_TRIGGER_CALL_REQUEST;
 }
 
 static bool valid_delivery(carelink_delivery_t delivery)

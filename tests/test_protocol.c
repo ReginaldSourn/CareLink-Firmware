@@ -203,7 +203,7 @@ static void test_malformed_frames(void)
             expect_mutation_rejected(OFFSET_TYPE, (uint8_t)value);
         }
         const bool valid_start_trigger = value >= CARELINK_TRIGGER_MANUAL &&
-                                         value <= CARELINK_TRIGGER_REMOTE_TEST;
+                                         value <= CARELINK_TRIGGER_CALL_REQUEST;
         if (!valid_start_trigger) {
             expect_mutation_rejected(OFFSET_TRIGGER, (uint8_t)value);
         }

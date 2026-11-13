@@ -59,6 +59,26 @@ static void format_sos(
         copy_line(lines[2], "CANCELLATION SENT");
         copy_line(lines[7], "HOLD SOS FOR HELP");
         break;
+    case CARELINK_DISPLAY_CALL_SENDING:
+        copy_line(lines[1], "CALL REQUEST");
+        copy_line(lines[2], "CONTACTING GATEWAY");
+        copy_line(lines[7], "DO NOT POWER OFF");
+        break;
+    case CARELINK_DISPLAY_CALL_GATEWAY_RECEIVED:
+        copy_line(lines[1], "CALL REQUEST SENT");
+        copy_line(lines[2], "GATEWAY RECEIVED");
+        copy_line(lines[7], "WAIT FOR CAREGIVER");
+        break;
+    case CARELINK_DISPLAY_CALL_CLOUD_ACCEPTED:
+        copy_line(lines[1], "CALL REQUEST SENT");
+        copy_line(lines[2], "CLOUD CONFIRMED");
+        copy_line(lines[7], "WAIT FOR CAREGIVER");
+        break;
+    case CARELINK_DISPLAY_CALL_CAREGIVER_ACKNOWLEDGED:
+        copy_line(lines[1], "CALL CONFIRMED");
+        copy_line(lines[2], "CAREGIVER ACK");
+        copy_line(lines[7], "CAREGIVER RESPONDING");
+        break;
     case CARELINK_DISPLAY_SOS_UNAVAILABLE:
     default:
         copy_line(lines[1], "SOS NOT READY");

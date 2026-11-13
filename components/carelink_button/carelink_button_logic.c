@@ -11,9 +11,13 @@ static uint32_t elapsed_ms(uint32_t now_ms, uint32_t then_ms)
 bool carelink_button_logic_config_valid(const carelink_button_logic_config_t *config)
 {
     return config != NULL && config->debounce_ms > 0U &&
+           config->double_press_ms > config->debounce_ms &&
+           config->double_press_ms < config->hold_ms &&
            config->hold_ms > config->debounce_ms &&
            config->stuck_ms > config->hold_ms &&
-           config->debounce_ms <= INT32_MAX && config->hold_ms <= INT32_MAX &&
+           config->debounce_ms <= INT32_MAX &&
+           config->double_press_ms <= INT32_MAX &&
+           config->hold_ms <= INT32_MAX &&
            config->stuck_ms <= INT32_MAX;
 }
 
@@ -38,6 +42,12 @@ carelink_button_logic_result_t carelink_button_logic_sample(carelink_button_logi
     carelink_button_logic_result_t result = {0};
     if (logic == NULL) return result;
 
+    if (logic->short_press_pending &&
+        elapsed_ms(now_ms, logic->last_short_release_ms) >
+            logic->config.double_press_ms) {
+        logic->short_press_pending = false;
+    }
+
     if (active != logic->raw_active) {
         logic->raw_active = active;
         logic->raw_changed_ms = now_ms;
@@ -51,11 +61,21 @@ carelink_button_logic_result_t carelink_button_logic_sample(carelink_button_logi
              * instant, so scheduling jitter does not extend the required hold. */
             logic->press_started_ms = logic->raw_changed_ms;
             logic->sos_emitted = false;
+            logic->call_emitted = false;
             logic->stuck_emitted = false;
             result.flags |= CARELINK_BUTTON_LOGIC_PRESSED;
+            if (logic->short_press_pending) {
+                logic->short_press_pending = false;
+                logic->call_emitted = true;
+                result.flags |= CARELINK_BUTTON_LOGIC_CALL_REQUESTED;
+            }
         } else {
             result.held_ms = elapsed_ms(now_ms, logic->press_started_ms);
             result.flags |= CARELINK_BUTTON_LOGIC_RELEASED;
+            if (!logic->sos_emitted && !logic->call_emitted) {
+                logic->last_short_release_ms = now_ms;
+                logic->short_press_pending = true;
+            }
         }
     }
 
@@ -63,6 +83,7 @@ carelink_button_logic_result_t carelink_button_logic_sample(carelink_button_logi
         result.held_ms = elapsed_ms(now_ms, logic->press_started_ms);
         if (!logic->sos_emitted && result.held_ms >= logic->config.hold_ms) {
             logic->sos_emitted = true;
+            logic->short_press_pending = false;
             result.flags |= CARELINK_BUTTON_LOGIC_SOS_TRIGGERED;
         }
         if (!logic->stuck_emitted && result.held_ms >= logic->config.stuck_ms) {

@@ -6,27 +6,32 @@
 
 static void test_sos_mapping(void)
 {
-    assert(carelink_buzzer_event_for_sos(CARELINK_SOS_IDLE, false) ==
+    assert(carelink_buzzer_event_for_sos(CARELINK_SOS_IDLE, 0, false) ==
            CARELINK_BUZZER_SILENT);
-    assert(carelink_buzzer_event_for_sos(CARELINK_SOS_ARMING, false) ==
+    assert(carelink_buzzer_event_for_sos(CARELINK_SOS_ARMING, 0, false) ==
            CARELINK_BUZZER_ARMING);
     assert(carelink_buzzer_event_for_sos(
-               CARELINK_SOS_ACTIVE_UNCONFIRMED, false) ==
+               CARELINK_SOS_ACTIVE_UNCONFIRMED,
+               CARELINK_SOS_TRIGGER_MANUAL, false) ==
            CARELINK_BUZZER_SOS_ACTIVE);
-    assert(carelink_buzzer_event_for_sos(CARELINK_SOS_RADIO_RECEIVED, false) ==
+    assert(carelink_buzzer_event_for_sos(
+               CARELINK_SOS_ACTIVE_UNCONFIRMED,
+               CARELINK_SOS_TRIGGER_CALL_REQUEST, false) ==
+           CARELINK_BUZZER_CALL_REQUEST);
+    assert(carelink_buzzer_event_for_sos(CARELINK_SOS_RADIO_RECEIVED, 0, false) ==
            CARELINK_BUZZER_GATEWAY_RECEIVED);
-    assert(carelink_buzzer_event_for_sos(CARELINK_SOS_CLOUD_ACCEPTED, false) ==
+    assert(carelink_buzzer_event_for_sos(CARELINK_SOS_CLOUD_ACCEPTED, 0, false) ==
            CARELINK_BUZZER_CLOUD_ACCEPTED);
     assert(carelink_buzzer_event_for_sos(
-               CARELINK_SOS_CAREGIVER_ACKNOWLEDGED, false) ==
+               CARELINK_SOS_CAREGIVER_ACKNOWLEDGED, 0, false) ==
            CARELINK_BUZZER_CAREGIVER_ACKNOWLEDGED);
-    assert(carelink_buzzer_event_for_sos(CARELINK_SOS_RESOLVED, false) ==
+    assert(carelink_buzzer_event_for_sos(CARELINK_SOS_RESOLVED, 0, false) ==
            CARELINK_BUZZER_RESOLVED);
-    assert(carelink_buzzer_event_for_sos(CARELINK_SOS_CANCELLED, true) ==
+    assert(carelink_buzzer_event_for_sos(CARELINK_SOS_CANCELLED, 0, true) ==
            CARELINK_BUZZER_CANCELLING);
-    assert(carelink_buzzer_event_for_sos(CARELINK_SOS_CANCELLED, false) ==
+    assert(carelink_buzzer_event_for_sos(CARELINK_SOS_CANCELLED, 0, false) ==
            CARELINK_BUZZER_CANCELLED);
-    assert(carelink_buzzer_event_for_sos(99, false) ==
+    assert(carelink_buzzer_event_for_sos(99, 0, false) ==
            CARELINK_BUZZER_SILENT);
 }
 
@@ -36,7 +41,7 @@ static void test_patterns(void)
         carelink_buzzer_pattern(CARELINK_BUZZER_SILENT);
     assert(silent.segments == NULL && silent.count == 0U && !silent.repeat);
 
-    for (int value = CARELINK_BUZZER_ARMING;
+    for (int value = CARELINK_BUZZER_STARTUP;
          value < CARELINK_BUZZER_EVENT_COUNT; ++value) {
         const carelink_buzzer_pattern_t pattern =
             carelink_buzzer_pattern((carelink_buzzer_event_t)value);
@@ -48,8 +53,24 @@ static void test_patterns(void)
         }
         assert(has_tone);
     }
-    assert(carelink_buzzer_pattern(CARELINK_BUZZER_ARMING).repeat);
+    assert(!carelink_buzzer_pattern(CARELINK_BUZZER_ARMING).repeat);
+    const carelink_buzzer_pattern_t startup =
+        carelink_buzzer_pattern(CARELINK_BUZZER_STARTUP);
+    assert(startup.count == 1U && startup.segments[0].tone &&
+           startup.segments[0].duration_ms == 500U && !startup.repeat);
     assert(carelink_buzzer_pattern(CARELINK_BUZZER_SOS_ACTIVE).repeat);
+    assert(!carelink_buzzer_pattern(CARELINK_BUZZER_CALL_REQUEST).repeat);
+    const carelink_buzzer_pattern_t press =
+        carelink_buzzer_pattern(CARELINK_BUZZER_ARMING);
+    assert(press.count == 1U && press.segments[0].tone);
+    const carelink_buzzer_pattern_t call =
+        carelink_buzzer_pattern(CARELINK_BUZZER_CALL_REQUEST);
+    assert(call.count == 3U && call.segments[0].tone &&
+           !call.segments[1].tone && call.segments[2].tone);
+    const carelink_buzzer_pattern_t sos =
+        carelink_buzzer_pattern(CARELINK_BUZZER_SOS_ACTIVE);
+    assert(sos.count == 6U && sos.segments[0].tone &&
+           sos.segments[2].tone && sos.segments[4].tone);
     assert(carelink_buzzer_pattern(CARELINK_BUZZER_CANCELLING).repeat);
     assert(!carelink_buzzer_pattern(
                 CARELINK_BUZZER_GATEWAY_RECEIVED).repeat);

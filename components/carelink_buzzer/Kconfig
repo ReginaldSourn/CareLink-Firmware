@@ -1,14 +1,23 @@
 menu "CareLink buzzer"
     config CARELINK_BUZZER_ENABLED
-        bool "Enable SOS feedback buzzer"
-        depends on CARELINK_INCIDENT_ENABLED
+        bool "Enable feedback buzzer"
         default n
         help
             Drives a passive piezo through an external transistor using PWM.
-            Feedback patterns are non-blocking and follow authenticated SOS
-            delivery state. Keep disabled when no buzzer circuit is fitted.
+            The power-on hardware check operates without the incident service.
+            When the incident service is enabled, non-blocking feedback patterns
+            also follow authenticated SOS delivery state. Keep disabled when no
+            buzzer circuit is fitted.
 
     if CARELINK_BUZZER_ENABLED
+        config CARELINK_BUZZER_STARTUP_BEEP
+            bool "Sound buzzer during startup"
+            default y
+            help
+                Sounds one 500 ms non-blocking beep after PWM and the buzzer
+                task initialize successfully. This provides an audible
+                power-on hardware check.
+
         config CARELINK_BUZZER_GPIO
             int "Buzzer transistor control GPIO"
             range 1 48

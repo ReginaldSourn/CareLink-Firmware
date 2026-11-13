@@ -6,8 +6,10 @@
 
 typedef enum {
     CARELINK_BUZZER_SILENT = 0,
+    CARELINK_BUZZER_STARTUP,
     CARELINK_BUZZER_ARMING,
     CARELINK_BUZZER_SOS_ACTIVE,
+    CARELINK_BUZZER_CALL_REQUEST,
     CARELINK_BUZZER_GATEWAY_RECEIVED,
     CARELINK_BUZZER_CLOUD_ACCEPTED,
     CARELINK_BUZZER_CAREGIVER_ACKNOWLEDGED,
@@ -30,6 +32,7 @@ typedef struct {
 
 carelink_buzzer_event_t carelink_buzzer_event_for_sos(
     int sos_state,
+    int sos_trigger,
     bool cancellation_pending);
 
 carelink_buzzer_pattern_t carelink_buzzer_pattern(

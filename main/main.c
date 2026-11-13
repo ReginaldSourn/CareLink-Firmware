@@ -10,6 +10,7 @@
 #include "carelink.h"
 #include "carelink_board.h"
 #include "carelink_ble_config.h"
+#include "carelink_button.h"
 #include "carelink_buzzer.h"
 #include "carelink_config.h"
 #include "carelink_gps.h"
@@ -21,6 +22,50 @@
 #include "sdkconfig.h"
 
 static const char *TAG = "carelink";
+
+#if CONFIG_CARELINK_BUTTON_ENABLED && \
+    !CONFIG_CARELINK_INCIDENT_ENABLED && \
+    CONFIG_CARELINK_BUZZER_ENABLED
+static bool s_standalone_sos_alert;
+
+static void prototype_button_feedback(const carelink_button_event_t *event,
+                                      void *context)
+{
+    (void)context;
+    esp_err_t error = ESP_OK;
+    switch (event->type) {
+    case CARELINK_BUTTON_EVENT_PRESSED:
+        error = carelink_buzzer_notify_sos(CARELINK_SOS_ARMING,
+                                           CARELINK_SOS_TRIGGER_MANUAL, false);
+        break;
+    case CARELINK_BUTTON_EVENT_CALL_REQUESTED:
+        error = carelink_buzzer_notify_sos(
+            CARELINK_SOS_ACTIVE_UNCONFIRMED,
+            CARELINK_SOS_TRIGGER_CALL_REQUEST, false);
+        break;
+    case CARELINK_BUTTON_EVENT_SOS_TRIGGERED:
+        s_standalone_sos_alert = true;
+        error = carelink_buzzer_notify_sos(
+            CARELINK_SOS_ACTIVE_UNCONFIRMED,
+            CARELINK_SOS_TRIGGER_MANUAL, false);
+        break;
+    case CARELINK_BUTTON_EVENT_RELEASED:
+        if (s_standalone_sos_alert) {
+            s_standalone_sos_alert = false;
+            error = carelink_buzzer_notify_sos(
+                CARELINK_SOS_IDLE, CARELINK_SOS_TRIGGER_MANUAL, false);
+        }
+        break;
+    case CARELINK_BUTTON_EVENT_STUCK:
+    default:
+        return;
+    }
+    if (error != ESP_OK) {
+        ESP_LOGW(TAG, "Prototype button sound failed: %s",
+                 esp_err_to_name(error));
+    }
+}
+#endif
 
 #if CONFIG_CARELINK_INCIDENT_ENABLED
 typedef struct {
@@ -107,12 +152,13 @@ static esp_err_t next_incident_counter(void *context, uint64_t *counter)
 
 #if CONFIG_CARELINK_BUZZER_ENABLED
 static void incident_status_changed(carelink_sos_state_t state,
+                                    carelink_sos_trigger_t trigger,
                                     bool cancellation_pending,
                                     void *context)
 {
     (void)context;
     const esp_err_t error =
-        carelink_buzzer_notify_sos(state, cancellation_pending);
+        carelink_buzzer_notify_sos(state, trigger, cancellation_pending);
     if (error != ESP_OK) {
         ESP_LOGW(TAG, "Buzzer state update failed: %s",
                  esp_err_to_name(error));
@@ -170,16 +216,36 @@ void app_main(void)
                  esp_err_to_name(err));
     }
 
-    bool incident_ready = false;
-#if CONFIG_CARELINK_INCIDENT_ENABLED
 #if CONFIG_CARELINK_BUZZER_ENABLED
     const esp_err_t buzzer_error = carelink_buzzer_start();
-    const bool buzzer_ready = buzzer_error == ESP_OK;
-    if (!buzzer_ready) {
-        ESP_LOGE(TAG, "SOS buzzer unavailable: %s; check GPIO and configuration",
+    if (buzzer_error != ESP_OK) {
+        ESP_LOGE(TAG, "Buzzer unavailable: %s; check GPIO and configuration",
                  esp_err_to_name(buzzer_error));
     }
 #endif
+
+#if CONFIG_CARELINK_BUTTON_ENABLED && !CONFIG_CARELINK_INCIDENT_ENABLED
+#if CONFIG_CARELINK_BUZZER_ENABLED
+    if (buzzer_error == ESP_OK) {
+        const esp_err_t callback_error =
+            carelink_button_set_callback(prototype_button_feedback, NULL);
+        if (callback_error != ESP_OK) {
+            ESP_LOGW(TAG, "Button sound callback unavailable: %s",
+                     esp_err_to_name(callback_error));
+        }
+    }
+#endif
+    const esp_err_t button_error = carelink_button_start();
+    if (button_error != ESP_OK) {
+        ESP_LOGE(TAG, "SOS button unavailable: %s; check GPIO and wiring",
+                 esp_err_to_name(button_error));
+    } else {
+        ESP_LOGI(TAG, "Prototype button diagnostics active without LoRa service");
+    }
+#endif
+
+    bool incident_ready = false;
+#if CONFIG_CARELINK_INCIDENT_ENABLED
     incident_context.gps_ready = gps_ready;
     uint32_t initial_battery_mv = 0U;
     const bool initial_battery_available =
@@ -203,7 +269,9 @@ void app_main(void)
             .get_telemetry = get_incident_telemetry,
             .next_replay_counter = next_incident_counter,
 #if CONFIG_CARELINK_BUZZER_ENABLED
-            .status_changed = buzzer_ready ? incident_status_changed : NULL,
+            .status_changed = buzzer_error == ESP_OK
+                                  ? incident_status_changed
+                                  : NULL,
 #endif
             .radio = {
                 .frequency_hz = runtime_config.radio_frequency_hz,

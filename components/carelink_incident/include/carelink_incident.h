@@ -24,6 +24,7 @@ typedef esp_err_t (*carelink_incident_next_counter_fn)(void *context,
  * must not block. */
 typedef void (*carelink_incident_status_changed_fn)(
     carelink_sos_state_t state,
+    carelink_sos_trigger_t trigger,
     bool cancellation_pending,
     void *context);
 
@@ -43,6 +44,7 @@ typedef struct {
 
 typedef struct {
     carelink_sos_state_t state;
+    carelink_sos_trigger_t trigger;
     esp_err_t last_error;
     uint32_t transmissions;
     uint32_t authenticated_acks;

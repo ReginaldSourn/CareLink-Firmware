@@ -16,6 +16,7 @@ esp_err_t carelink_buzzer_start(void);
 /* Safe to call from a task callback. Duplicate states are ignored so location
  * updates and retries do not replay a completed acknowledgement pattern. */
 esp_err_t carelink_buzzer_notify_sos(carelink_sos_state_t state,
+                                     carelink_sos_trigger_t trigger,
                                      bool cancellation_pending);
 
 #ifdef __cplusplus

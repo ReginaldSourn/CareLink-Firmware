@@ -12,7 +12,7 @@ static bool valid_state(carelink_sos_state_t state)
 static bool valid_trigger(carelink_sos_trigger_t trigger)
 {
     return trigger >= CARELINK_SOS_TRIGGER_MANUAL &&
-           trigger <= CARELINK_SOS_TRIGGER_REMOTE_TEST;
+           trigger <= CARELINK_SOS_TRIGGER_CALL_REQUEST;
 }
 
 static bool active_state(carelink_sos_state_t state)

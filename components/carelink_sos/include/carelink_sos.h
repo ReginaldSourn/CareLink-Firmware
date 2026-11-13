@@ -22,6 +22,7 @@ typedef enum {
     CARELINK_SOS_TRIGGER_MANUAL = 1,
     CARELINK_SOS_TRIGGER_FALL = 2,
     CARELINK_SOS_TRIGGER_REMOTE_TEST = 3,
+    CARELINK_SOS_TRIGGER_CALL_REQUEST = 4,
 } carelink_sos_trigger_t;
 
 typedef enum {

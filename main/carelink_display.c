@@ -64,19 +64,26 @@ static carelink_display_sos_t sos_state(
     if (!status->incident_available || !status->incident.running) {
         return CARELINK_DISPLAY_SOS_UNAVAILABLE;
     }
+    const bool call_request =
+        status->incident.trigger == CARELINK_SOS_TRIGGER_CALL_REQUEST;
     switch (status->incident.state) {
     case CARELINK_SOS_IDLE:
         return CARELINK_DISPLAY_SOS_READY;
     case CARELINK_SOS_ARMING:
         return CARELINK_DISPLAY_SOS_ARMING;
     case CARELINK_SOS_ACTIVE_UNCONFIRMED:
-        return CARELINK_DISPLAY_SOS_SENDING;
+        return call_request ? CARELINK_DISPLAY_CALL_SENDING
+                            : CARELINK_DISPLAY_SOS_SENDING;
     case CARELINK_SOS_RADIO_RECEIVED:
-        return CARELINK_DISPLAY_SOS_GATEWAY_RECEIVED;
+        return call_request ? CARELINK_DISPLAY_CALL_GATEWAY_RECEIVED
+                            : CARELINK_DISPLAY_SOS_GATEWAY_RECEIVED;
     case CARELINK_SOS_CLOUD_ACCEPTED:
-        return CARELINK_DISPLAY_SOS_CLOUD_ACCEPTED;
+        return call_request ? CARELINK_DISPLAY_CALL_CLOUD_ACCEPTED
+                            : CARELINK_DISPLAY_SOS_CLOUD_ACCEPTED;
     case CARELINK_SOS_CAREGIVER_ACKNOWLEDGED:
-        return CARELINK_DISPLAY_SOS_CAREGIVER_ACKNOWLEDGED;
+        return call_request
+                   ? CARELINK_DISPLAY_CALL_CAREGIVER_ACKNOWLEDGED
+                   : CARELINK_DISPLAY_SOS_CAREGIVER_ACKNOWLEDGED;
     case CARELINK_SOS_RESOLVED:
         return CARELINK_DISPLAY_SOS_RESOLVED;
     case CARELINK_SOS_CANCELLED:

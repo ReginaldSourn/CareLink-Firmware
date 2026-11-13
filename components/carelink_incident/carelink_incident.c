@@ -69,6 +69,7 @@ static void status_state(void)
         s_sos.snapshot.cancel_delivery_pending;
     portENTER_CRITICAL(&s_status_lock);
     s_status.state = state;
+    s_status.trigger = s_sos.snapshot.trigger;
     s_status.configuration_locked =
         state == CARELINK_SOS_ARMING ||
         (state >= CARELINK_SOS_ACTIVE_UNCONFIRMED &&
@@ -76,7 +77,8 @@ static void status_state(void)
         cancellation_pending;
     portEXIT_CRITICAL(&s_status_lock);
     if (s_config.status_changed != NULL) {
-        s_config.status_changed(state, cancellation_pending,
+        s_config.status_changed(state, s_sos.snapshot.trigger,
+                                cancellation_pending,
                                 s_config.status_changed_context);
     }
 }
@@ -202,6 +204,30 @@ static uint64_t next_local_token(void)
     return ++s_local_event_token;
 }
 
+static void trigger_from_button(carelink_sos_trigger_t trigger,
+                                bool allow_active_cancel)
+{
+    carelink_sos_event_t event = {
+        .local_event_token = next_local_token(),
+        .trigger = trigger,
+    };
+    if (s_sos.snapshot.state == CARELINK_SOS_IDLE ||
+        s_sos.snapshot.state == CARELINK_SOS_ARMING) {
+        event.type = CARELINK_SOS_EVENT_TRIGGER;
+        event.incident_id = new_incident_id();
+    } else if (allow_active_cancel &&
+               s_sos.snapshot.state >= CARELINK_SOS_ACTIVE_UNCONFIRMED &&
+               s_sos.snapshot.state <=
+                   CARELINK_SOS_CAREGIVER_ACKNOWLEDGED) {
+        event.type = CARELINK_SOS_EVENT_CANCEL;
+        event.incident_id = s_sos.snapshot.incident_id;
+    } else {
+        return;
+    }
+    carelink_retry_reset(&s_retry);
+    apply_action(carelink_sos_apply(&s_sos, &event));
+}
+
 static void handle_button(const carelink_button_event_t *button)
 {
     if (button->type == CARELINK_BUTTON_EVENT_PRESSED &&
@@ -222,28 +248,13 @@ static void handle_button(const carelink_button_event_t *button)
         apply_action(carelink_sos_apply(&s_sos, &event));
         return;
     }
-    if (button->type != CARELINK_BUTTON_EVENT_SOS_TRIGGERED) {
+    if (button->type == CARELINK_BUTTON_EVENT_CALL_REQUESTED) {
+        trigger_from_button(CARELINK_SOS_TRIGGER_CALL_REQUEST, false);
         return;
     }
-
-    carelink_sos_event_t event = {
-        .local_event_token = next_local_token(),
-        .trigger = CARELINK_SOS_TRIGGER_MANUAL,
-    };
-    carelink_retry_reset(&s_retry);
-    if (s_sos.snapshot.state == CARELINK_SOS_IDLE ||
-        s_sos.snapshot.state == CARELINK_SOS_ARMING) {
-        event.type = CARELINK_SOS_EVENT_TRIGGER;
-        event.incident_id = new_incident_id();
-    } else if (s_sos.snapshot.state >= CARELINK_SOS_ACTIVE_UNCONFIRMED &&
-               s_sos.snapshot.state <=
-                   CARELINK_SOS_CAREGIVER_ACKNOWLEDGED) {
-        event.type = CARELINK_SOS_EVENT_CANCEL;
-        event.incident_id = s_sos.snapshot.incident_id;
-    } else {
-        return;
+    if (button->type == CARELINK_BUTTON_EVENT_SOS_TRIGGERED) {
+        trigger_from_button(CARELINK_SOS_TRIGGER_MANUAL, true);
     }
-    apply_action(carelink_sos_apply(&s_sos, &event));
 }
 
 static void button_callback(const carelink_button_event_t *event,
@@ -390,6 +401,7 @@ static void incident_task(void *argument)
         portENTER_CRITICAL(&s_status_lock);
         s_status.running = true;
         s_status.state = s_sos.snapshot.state;
+        s_status.trigger = s_sos.snapshot.trigger;
         s_status.configuration_locked =
             s_sos.snapshot.state == CARELINK_SOS_ARMING ||
             is_active_or_pending_cancel();
@@ -397,6 +409,7 @@ static void incident_task(void *argument)
         if (s_config.status_changed != NULL) {
             s_config.status_changed(
                 s_sos.snapshot.state,
+                s_sos.snapshot.trigger,
                 s_sos.snapshot.cancel_delivery_pending,
                 s_config.status_changed_context);
         }

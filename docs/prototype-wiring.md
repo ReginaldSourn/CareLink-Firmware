@@ -117,6 +117,12 @@ Wire a normally-open momentary button between GPIO4 (J3 pin 15) and GND (J3 pin
 applies 40 ms debounce and requires a 1.5-second hold by default. Do not use
 GPIO0/PRG as SOS; it is a boot-strapping and download-mode button.
 
+Button gestures are deliberately distinct: a press gives one short beep, a
+1.5-second hold sends a manual SOS and starts the repeating three-beep delivery
+pattern, and two quick presses within 450 ms send a caregiver call request with
+a two-beep confirmation. The call request uses the authenticated incident
+transport; it does not place a cellular voice call from the pendant.
+
 For a breadboard, keep the GPIO4 wire short. A production pendant should add a
 reviewed ESD/transient network and verify behavior with a stuck or damaged
 button; that protection is not represented by loose prototype wiring.
@@ -138,7 +144,9 @@ The non-blocking feedback patterns are:
 
 | SOS stage | Sound |
 | --- | --- |
-| Button arming | Short repeating chirp while held |
+| Buzzer initialized at power-on | One 500 ms self-test beep |
+| Button pressed | One short confirmation beep |
+| Double press / call request | Two confirmation beeps |
 | Contacting gateway | Repeating group of three tones |
 | Gateway/cloud receipt | Short confirmation pair |
 | Caregiver acknowledged | Two long confirmation tones |
@@ -182,7 +190,7 @@ Set these values in `idf.py menuconfig`:
 | OLED | Enabled |
 | IMU | LSM6DSO enabled, address `0x6A`, shared I2C disabled |
 | IMU SDA / SCL / Vext | GPIO47 / GPIO48 / enabled |
-| SOS button | Enabled, GPIO4, active-low, pull-up |
+| SOS button | Enabled, GPIO4, active-low, pull-up, 450 ms double-press window |
 | SOS buzzer | Enabled, GPIO6, 2400 Hz, 50% duty |
 | Radio | Enabled with exact V4.2, V4.3.1, or R8 profile |
 | Incident service | Enable only after provisioning the device HMAC key |

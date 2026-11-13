@@ -4,6 +4,7 @@
 
 #if CONFIG_CARELINK_BUTTON_ENABLED
 
+#include <inttypes.h>
 #include <limits.h>
 
 #include "carelink_board.h"
@@ -11,6 +12,7 @@
 #include "driver/gpio.h"
 #include "esp_attr.h"
 #include "esp_intr_alloc.h"
+#include "esp_log.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
@@ -21,6 +23,7 @@
 #define BUTTON_STACK_WORDS \
     (CONFIG_CARELINK_BUTTON_TASK_STACK_BYTES / sizeof(StackType_t))
 
+static const char *TAG = "carelink_button";
 static portMUX_TYPE s_lock = portMUX_INITIALIZER_UNLOCKED;
 static carelink_button_logic_t s_logic;
 static carelink_button_stats_t s_stats;
@@ -71,11 +74,18 @@ static void publish_event(carelink_button_event_type_t type, uint32_t timestamp_
 
     taskENTER_CRITICAL(&s_lock);
     ++s_stats.published_events;
-    if (type == CARELINK_BUTTON_EVENT_PRESSED) s_stats.pressed = true;
+    if (type == CARELINK_BUTTON_EVENT_PRESSED ||
+        type == CARELINK_BUTTON_EVENT_CALL_REQUESTED) {
+        s_stats.pressed = true;
+    }
+    if (type == CARELINK_BUTTON_EVENT_CALL_REQUESTED) {
+        s_stats.call_requested = true;
+    }
     if (type == CARELINK_BUTTON_EVENT_SOS_TRIGGERED) s_stats.sos_triggered = true;
     if (type == CARELINK_BUTTON_EVENT_STUCK) s_stats.stuck = true;
     if (type == CARELINK_BUTTON_EVENT_RELEASED) {
         s_stats.pressed = false;
+        s_stats.call_requested = false;
         s_stats.sos_triggered = false;
         s_stats.stuck = false;
     }
@@ -83,6 +93,40 @@ static void publish_event(carelink_button_event_type_t type, uint32_t timestamp_
     callback = s_callback;
     callback_context = s_callback_context;
     taskEXIT_CRITICAL(&s_lock);
+
+    switch (type) {
+    case CARELINK_BUTTON_EVENT_PRESSED:
+        ESP_LOGI(TAG,
+                 "BUTTON pressed=yes GPIO%d sequence=%" PRIu32,
+                 CONFIG_CARELINK_BUTTON_GPIO, event.sequence);
+        break;
+    case CARELINK_BUTTON_EVENT_RELEASED:
+        ESP_LOGI(TAG,
+                 "BUTTON pressed=no GPIO%d held=%" PRIu32
+                 " ms sequence=%" PRIu32,
+                 CONFIG_CARELINK_BUTTON_GPIO, held_ms, event.sequence);
+        break;
+    case CARELINK_BUTTON_EVENT_CALL_REQUESTED:
+        ESP_LOGI(TAG,
+                 "BUTTON double-press GPIO%d: caregiver call requested "
+                 "sequence=%" PRIu32,
+                 CONFIG_CARELINK_BUTTON_GPIO, event.sequence);
+        break;
+    case CARELINK_BUTTON_EVENT_SOS_TRIGGERED:
+        ESP_LOGI(TAG,
+                 "BUTTON hold GPIO%d held=%" PRIu32
+                 " ms: SOS triggered sequence=%" PRIu32,
+                 CONFIG_CARELINK_BUTTON_GPIO, held_ms, event.sequence);
+        break;
+    case CARELINK_BUTTON_EVENT_STUCK:
+        ESP_LOGW(TAG,
+                 "BUTTON stuck GPIO%d pressed=yes held=%" PRIu32
+                 " ms sequence=%" PRIu32,
+                 CONFIG_CARELINK_BUTTON_GPIO, held_ms, event.sequence);
+        break;
+    default:
+        break;
+    }
 
     if (xQueueSend(s_event_queue, &event, 0) != pdTRUE) {
         carelink_button_event_t discarded;
@@ -100,7 +144,10 @@ static void process_sample(uint32_t timestamp_ms)
 {
     carelink_button_logic_result_t result =
         carelink_button_logic_sample(&s_logic, gpio_active(), timestamp_ms);
-    if ((result.flags & CARELINK_BUTTON_LOGIC_PRESSED) != 0U) {
+    if ((result.flags & CARELINK_BUTTON_LOGIC_CALL_REQUESTED) != 0U) {
+        publish_event(CARELINK_BUTTON_EVENT_CALL_REQUESTED, timestamp_ms,
+                      result.held_ms);
+    } else if ((result.flags & CARELINK_BUTTON_LOGIC_PRESSED) != 0U) {
         publish_event(CARELINK_BUTTON_EVENT_PRESSED, timestamp_ms, result.held_ms);
     }
     if ((result.flags & CARELINK_BUTTON_LOGIC_SOS_TRIGGERED) != 0U) {
@@ -145,6 +192,7 @@ static esp_err_t validate_config(void)
     const int button_gpio = CONFIG_CARELINK_BUTTON_GPIO;
     carelink_button_logic_config_t config = {
         .debounce_ms = CONFIG_CARELINK_BUTTON_DEBOUNCE_MS,
+        .double_press_ms = CONFIG_CARELINK_BUTTON_DOUBLE_PRESS_MS,
         .hold_ms = CONFIG_CARELINK_BUTTON_HOLD_MS,
         .stuck_ms = CONFIG_CARELINK_BUTTON_STUCK_MS,
     };
@@ -192,6 +240,7 @@ esp_err_t carelink_button_start(void)
 
     carelink_button_logic_config_t logic_config = {
         .debounce_ms = CONFIG_CARELINK_BUTTON_DEBOUNCE_MS,
+        .double_press_ms = CONFIG_CARELINK_BUTTON_DOUBLE_PRESS_MS,
         .hold_ms = CONFIG_CARELINK_BUTTON_HOLD_MS,
         .stuck_ms = CONFIG_CARELINK_BUTTON_STUCK_MS,
     };
@@ -233,6 +282,9 @@ esp_err_t carelink_button_start(void)
     error = gpio_intr_enable((gpio_num_t)CONFIG_CARELINK_BUTTON_GPIO);
     if (error != ESP_OK) goto fail_handler;
     s_started = true;
+    ESP_LOGI(TAG, "SOS button ready on GPIO%d: pressed=%s",
+             CONFIG_CARELINK_BUTTON_GPIO,
+             s_logic.stable_active ? "yes" : "no");
     return ESP_OK;
 
 fail_handler:

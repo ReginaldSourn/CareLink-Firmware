@@ -26,6 +26,9 @@ static bool map_trigger(carelink_sos_trigger_t source,
     case CARELINK_SOS_TRIGGER_REMOTE_TEST:
         *destination = CARELINK_TRIGGER_REMOTE_TEST;
         return true;
+    case CARELINK_SOS_TRIGGER_CALL_REQUEST:
+        *destination = CARELINK_TRIGGER_CALL_REQUEST;
+        return true;
     default:
         return false;
     }

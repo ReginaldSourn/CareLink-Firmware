@@ -7,6 +7,7 @@
 
 static const carelink_button_logic_config_t config = {
     .debounce_ms = 40,
+    .double_press_ms = 400,
     .hold_ms = 1000,
     .stuck_ms = 5000,
 };
@@ -23,6 +24,12 @@ static void test_config_and_pin_validation(void)
     assert(carelink_button_logic_config_valid(&config));
     assert(!carelink_button_logic_config_valid(NULL));
     invalid.debounce_ms = 0;
+    assert(!carelink_button_logic_config_valid(&invalid));
+    invalid = config;
+    invalid.double_press_ms = invalid.debounce_ms;
+    assert(!carelink_button_logic_config_valid(&invalid));
+    invalid = config;
+    invalid.double_press_ms = invalid.hold_ms;
     assert(!carelink_button_logic_config_valid(&invalid));
     invalid = config;
     invalid.hold_ms = invalid.debounce_ms;
@@ -101,6 +108,39 @@ static void test_valid_hold_fires_once(void)
     assert(sample(&logic, true, 7000).flags == CARELINK_BUTTON_LOGIC_SOS_TRIGGERED);
 }
 
+static void test_double_press_requests_call_once(void)
+{
+    carelink_button_logic_t logic;
+    assert(carelink_button_logic_init(&logic, &config, false, 0));
+
+    assert(sample(&logic, true, 0).flags == 0U);
+    assert(sample(&logic, true, 40).flags == CARELINK_BUTTON_LOGIC_PRESSED);
+    assert(sample(&logic, false, 100).flags == 0U);
+    assert(sample(&logic, false, 140).flags == CARELINK_BUTTON_LOGIC_RELEASED);
+
+    assert(sample(&logic, true, 250).flags == 0U);
+    const carelink_button_logic_result_t second = sample(&logic, true, 290);
+    assert(second.flags == (CARELINK_BUTTON_LOGIC_PRESSED |
+                            CARELINK_BUTTON_LOGIC_CALL_REQUESTED));
+
+    assert(sample(&logic, false, 350).flags == 0U);
+    assert(sample(&logic, false, 390).flags == CARELINK_BUTTON_LOGIC_RELEASED);
+    assert(sample(&logic, true, 450).flags == 0U);
+    assert(sample(&logic, true, 490).flags == CARELINK_BUTTON_LOGIC_PRESSED);
+}
+
+static void test_double_press_window_expires(void)
+{
+    carelink_button_logic_t logic;
+    assert(carelink_button_logic_init(&logic, &config, false, 0));
+    assert(sample(&logic, true, 0).flags == 0U);
+    assert(sample(&logic, true, 40).flags == CARELINK_BUTTON_LOGIC_PRESSED);
+    assert(sample(&logic, false, 100).flags == 0U);
+    assert(sample(&logic, false, 140).flags == CARELINK_BUTTON_LOGIC_RELEASED);
+    assert(sample(&logic, true, 541).flags == 0U);
+    assert(sample(&logic, true, 581).flags == CARELINK_BUTTON_LOGIC_PRESSED);
+}
+
 static void test_stuck_button(void)
 {
     carelink_button_logic_t logic;
@@ -131,14 +171,34 @@ static void test_timestamp_wrap(void)
     assert(result.held_ms == 1000U);
 }
 
+static void test_double_press_across_timestamp_wrap(void)
+{
+    carelink_button_logic_t logic;
+    const uint32_t start = UINT32_MAX - 200U;
+    assert(carelink_button_logic_init(&logic, &config, false, start));
+    assert(sample(&logic, true, UINT32_MAX - 180U).flags == 0U);
+    assert(sample(&logic, true, UINT32_MAX - 140U).flags ==
+           CARELINK_BUTTON_LOGIC_PRESSED);
+    assert(sample(&logic, false, UINT32_MAX - 100U).flags == 0U);
+    assert(sample(&logic, false, UINT32_MAX - 60U).flags ==
+           CARELINK_BUTTON_LOGIC_RELEASED);
+    assert(sample(&logic, true, 20U).flags == 0U);
+    const carelink_button_logic_result_t result = sample(&logic, true, 60U);
+    assert(result.flags == (CARELINK_BUTTON_LOGIC_PRESSED |
+                            CARELINK_BUTTON_LOGIC_CALL_REQUESTED));
+}
+
 int main(void)
 {
     test_config_and_pin_validation();
     test_bounce();
     test_short_press_and_release_bounce();
     test_valid_hold_fires_once();
+    test_double_press_requests_call_once();
+    test_double_press_window_expires();
     test_stuck_button();
     test_timestamp_wrap();
+    test_double_press_across_timestamp_wrap();
     puts("SOS button state, safety and timestamp-wrap tests passed");
     return 0;
 }

@@ -40,17 +40,23 @@ static void imu_task(void *arg)
     if (!poll_ticks) poll_ticks = 1;
     for (;;) {
         if (reinitialize) {
+            ESP_LOGW(TAG, "IMU recovery starting after read/stale fault");
             vTaskDelay(pdMS_TO_TICKS(1000));
             carelink_lsm6dso_result_t result = carelink_lsm6dso_init(&device, &config);
             if (result != CARELINK_LSM6DSO_OK) {
                 current.fault = true;
                 ++current.read_errors;
+                ESP_LOGE(TAG,
+                         "IMU recovery failed reason=%d I2C=%s errors=%lu",
+                         result, esp_err_to_name(port.last_error),
+                         (unsigned long)current.read_errors);
                 publish(&current);
                 continue;
             }
             /* Preserve error/stale status until a new complete sample arrives. */
             progress_us = esp_timer_get_time();
             reinitialize = false;
+            ESP_LOGI(TAG, "IMU recovery complete; waiting for fresh sample");
         }
         vTaskDelay(poll_ticks);
         carelink_imu_sample_t sample;
@@ -65,11 +71,16 @@ static void imu_task(void *arg)
         } else if (result != CARELINK_LSM6DSO_NO_SAMPLE) {
             current.fault = true;
             ++current.read_errors;
+            ESP_LOGE(TAG, "IMU read failed reason=%d I2C=%s errors=%lu",
+                     result, esp_err_to_name(port.last_error),
+                     (unsigned long)current.read_errors);
             reinitialize = true;
         } else if (now - progress_us >= (int64_t)CONFIG_CARELINK_IMU_STALE_MS * 1000) {
             /* Also recover a sensor that acknowledged I2C but lost its ODR
              * settings after a supply interruption. */
             reinitialize = true;
+            ESP_LOGW(TAG, "IMU data stale for %d ms; scheduling recovery",
+                     CONFIG_CARELINK_IMU_STALE_MS);
         }
         publish(&current);
     }

@@ -11,6 +11,7 @@ extern "C" {
  * wrap-safe provided no configured interval is 2^31 ms or longer. */
 typedef struct {
     uint32_t debounce_ms;
+    uint32_t double_press_ms;
     uint32_t hold_ms;
     uint32_t stuck_ms;
 } carelink_button_logic_config_t;
@@ -21,6 +22,7 @@ typedef enum {
     CARELINK_BUTTON_LOGIC_SOS_TRIGGERED = 1U << 1,
     CARELINK_BUTTON_LOGIC_RELEASED = 1U << 2,
     CARELINK_BUTTON_LOGIC_STUCK = 1U << 3,
+    CARELINK_BUTTON_LOGIC_CALL_REQUESTED = 1U << 4,
 } carelink_button_logic_flags_t;
 
 typedef struct {
@@ -32,10 +34,13 @@ typedef struct {
     carelink_button_logic_config_t config;
     uint32_t raw_changed_ms;
     uint32_t press_started_ms;
+    uint32_t last_short_release_ms;
     bool raw_active;
     bool stable_active;
     bool sos_emitted;
+    bool call_emitted;
     bool stuck_emitted;
+    bool short_press_pending;
 } carelink_button_logic_t;
 
 bool carelink_button_logic_config_valid(const carelink_button_logic_config_t *config);

@@ -14,6 +14,7 @@ typedef enum {
     CARELINK_BUTTON_EVENT_SOS_TRIGGERED,
     CARELINK_BUTTON_EVENT_RELEASED,
     CARELINK_BUTTON_EVENT_STUCK,
+    CARELINK_BUTTON_EVENT_CALL_REQUESTED,
 } carelink_button_event_type_t;
 
 typedef struct {
@@ -32,6 +33,7 @@ typedef struct {
     uint32_t dropped_events;
     uint32_t last_edge_timestamp_ms;
     bool pressed;
+    bool call_requested;
     bool sos_triggered;
     bool stuck;
 } carelink_button_stats_t;

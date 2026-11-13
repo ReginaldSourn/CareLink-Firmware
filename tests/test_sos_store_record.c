@@ -71,6 +71,15 @@ static void test_round_trip_and_layout(void)
     assert(generation == UINT32_C(0xa1b2c3d4));
     assert_snapshot_equal(&expected, &actual);
 
+    carelink_sos_snapshot_t call_request = expected;
+    call_request.trigger = CARELINK_SOS_TRIGGER_CALL_REQUEST;
+    encode(&call_request, 6U, record);
+    memset(&actual, 0, sizeof(actual));
+    assert(carelink_sos_store_record_decode(
+               record, sizeof(record), &actual, &generation) ==
+           CARELINK_SOS_STORE_RECORD_OK);
+    assert_snapshot_equal(&call_request, &actual);
+
     carelink_sos_snapshot_t cancelled = expected;
     cancelled.state = CARELINK_SOS_CANCELLED;
     cancelled.sequence++;

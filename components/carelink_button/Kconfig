@@ -12,8 +12,9 @@ menu "CareLink SOS button"
             range 1 48
             default 4
             help
-                Only free Heltec V4 header GPIOs are accepted. Radio, FEM,
-                OLED, GNSS, USB, strapping, memory and power pins are rejected.
+                GPIO4 is J3 pin 15 on V4 R2. Only free Heltec V4 header GPIOs
+                are accepted. Radio, FEM, OLED, GNSS, USB, strapping, memory
+                and power pins are rejected.
 
         choice CARELINK_BUTTON_ACTIVE_LEVEL
             prompt "Button active level"
@@ -44,6 +45,15 @@ menu "CareLink SOS button"
             int "SOS hold threshold (milliseconds)"
             range 500 10000
             default 1500
+
+        config CARELINK_BUTTON_DOUBLE_PRESS_MS
+            int "Double-press window (milliseconds)"
+            range 200 1000
+            default 450
+            help
+                A second debounced press inside this window sends a caregiver
+                call request. This value must be shorter than the SOS hold
+                threshold.
 
         config CARELINK_BUTTON_STUCK_MS
             int "Stuck-button threshold (milliseconds)"
